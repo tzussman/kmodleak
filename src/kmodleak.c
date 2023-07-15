@@ -86,8 +86,6 @@ static void sig_handler(int signo)
 }
 
 struct ksyms *ksyms;
-static uint64_t *stack;
-static struct allocation *allocs;
 
 static struct kmodleak_bpf *skel = NULL;
 
@@ -133,7 +131,7 @@ int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list a
 	return vfprintf(stderr, format, args);
 }
 
-void print_stack_frames_by_ksyms()
+void print_stack_frames_by_ksyms(uint64_t *stack)
 {
 	for (size_t i = 0; i < env.perf_max_stack_depth; ++i) {
 		const uint64_t addr = stack[i];
@@ -151,6 +149,14 @@ void print_stack_frames_by_ksyms()
 
 int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_traces_fd)
 {
+	int ret = 0;
+
+	uint64_t *stack = calloc(env.perf_max_stack_depth, sizeof(*stack));
+	if (!stack) {
+		perror("failed to allocate stack array");
+		return -ENOMEM;
+	}
+
 	for (size_t i = 0; i < nr_allocs; ++i) {
 		const struct allocation *alloc = &allocs[i];
 
@@ -168,13 +174,16 @@ int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_tr
 
 			perror("failed to lookup stack trace");
 
-			return -errno;
+			ret = -errno;
+			goto cleanup;
 		}
 
-		print_stack_frames_by_ksyms();
+		print_stack_frames_by_ksyms(stack);
 	}
 
-	return 0;
+cleanup:
+	free(stack);
+	return ret;
 }
 
 int alloc_size_compare(const void *a, const void *b)
@@ -183,7 +192,6 @@ int alloc_size_compare(const void *a, const void *b)
 	const struct allocation *y = (struct allocation *)b;
 
 	// descending order
-
 	if (x->size > y->size)
 		return -1;
 
@@ -193,12 +201,16 @@ int alloc_size_compare(const void *a, const void *b)
 	return 0;
 }
 
-int print_outstanding_allocs(int allocs_fd, int stack_traces_fd)
+int print_allocs(int allocs_fd, int stack_traces_fd)
 {
-	time_t t = time(NULL);
-	struct tm *tm = localtime(&t);
-
 	size_t nr_allocs = 0;
+	int ret = 0;
+
+	struct allocation *allocs = calloc(ALLOCS_MAX_ENTRIES, sizeof(*allocs));
+	if (!allocs) {
+		perror("failed to allocate array");
+		return -ENOMEM;
+	}
 
 	// for each struct alloc_info "alloc_info" in the bpf map "allocs"
 	for (uint64_t prev_key = 0, curr_key = 0;; prev_key = curr_key) {
@@ -211,7 +223,8 @@ int print_outstanding_allocs(int allocs_fd, int stack_traces_fd)
 
 			perror("map get next key error");
 
-			return -errno;
+			ret = -errno;
+			goto cleanup;
 		}
 
 		if (bpf_map_lookup_elem(allocs_fd, &curr_key, &alloc_info)) {
@@ -220,7 +233,8 @@ int print_outstanding_allocs(int allocs_fd, int stack_traces_fd)
 
 			perror("map lookup error");
 
-			return -errno;
+			ret = -errno;
+			goto cleanup;
 		}
 
 		// filter invalid stacks
@@ -241,7 +255,8 @@ int print_outstanding_allocs(int allocs_fd, int stack_traces_fd)
 				struct allocation_node* node = malloc(sizeof(struct allocation_node));
 				if (!node) {
 					perror("malloc failed");
-					return -errno;
+					ret = -errno;
+					goto cleanup;
 				}
 				node->address = curr_key;
 				node->size = alloc_info.size;
@@ -268,7 +283,8 @@ int print_outstanding_allocs(int allocs_fd, int stack_traces_fd)
 		struct allocation_node* node = malloc(sizeof(struct allocation_node));
 		if (!node) {
 			perror("malloc failed");
-			return -errno;
+			ret = -errno;
+			goto cleanup;
 		}
 		node->address = curr_key;
 		node->size = alloc_info.size;
@@ -282,26 +298,23 @@ int print_outstanding_allocs(int allocs_fd, int stack_traces_fd)
 	// sort the allocs array in descending order
 	qsort(allocs, nr_allocs, sizeof(allocs[0]), alloc_size_compare);
 
-	size_t nr_allocs_to_show = nr_allocs;
+	printf("\n%zu stacks with outstanding allocations:\n", nr_allocs);
 
-	printf("[%d:%d:%d] Top %zu stacks with outstanding allocations:\n",
-			tm->tm_hour, tm->tm_min, tm->tm_sec, nr_allocs_to_show);
+	print_stack_frames(allocs, nr_allocs, stack_traces_fd);
 
-	print_stack_frames(allocs, nr_allocs_to_show, stack_traces_fd);
-
-	// Reset allocs list so that we dont accidentaly reuse data the next time we call this function
+	// Free allocs list
 	for (size_t i = 0; i < nr_allocs; i++) {
-		allocs[i].stack_id = 0;
 		struct allocation_node *it = allocs[i].allocations;
 		while (it != NULL) {
 			struct allocation_node *this = it;
 			it = it->next;
 			free(this);
 		}
-		allocs[i].allocations = NULL;
 	}
 
-	return 0;
+cleanup:
+	free(allocs);
+	return ret;
 }
 
 bool has_kernel_node_tracepoints()
@@ -410,23 +423,6 @@ int main(int argc, char *argv[])
 	env.page_size = sysconf(_SC_PAGE_SIZE);
 	printf("using page size: %ld\n", env.page_size);
 
-	// allocate space for storing a stack trace
-	stack = calloc(env.perf_max_stack_depth, sizeof(*stack));
-	if (!stack) {
-		fprintf(stderr, "failed to allocate stack array\n");
-		ret = -ENOMEM;
-
-		goto cleanup;
-	}
-
-	allocs = calloc(ALLOCS_MAX_ENTRIES, sizeof(*allocs));
-	if (!allocs) {
-		fprintf(stderr, "failed to allocate array\n");
-		ret = -ENOMEM;
-
-		goto cleanup;
-	}
-
 	libbpf_set_print(libbpf_print_fn);
 
 	skel = kmodleak_bpf__open();
@@ -497,20 +493,17 @@ int main(int argc, char *argv[])
 		} else if (ret < 0) {
 			fprintf(stderr, "error polling ring buffer: %d\n", ret);
 			goto cleanup;
+		} else {
+			ret = 0;
 		}
 	}
 
-	print_outstanding_allocs(allocs_fd, stack_traces_fd);
+	print_allocs(allocs_fd, stack_traces_fd);
 
 cleanup:
-	if (ksyms)
-		ksyms__free(ksyms);
-
+	ksyms__free(ksyms);
 	ring_buffer__free(events);
 	kmodleak_bpf__destroy(skel);
-
-	free(allocs);
-	free(stack);
 
 	printf("done\n");
 

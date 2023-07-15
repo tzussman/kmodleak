@@ -6,8 +6,6 @@
 #define MODULE_NAME_LEN			56
 #define PERF_MAX_STACK_DEPTH	127
 
-#define __noinline __attribute__((noinline))
-
 struct alloc_info {
 	__u64 size;
 	__u64 timestamp_ns;
