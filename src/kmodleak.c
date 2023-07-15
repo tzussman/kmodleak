@@ -341,7 +341,7 @@ void disable_kernel_module_load_tracepoint(struct kmodleak_bpf *skel)
 
 void disable_kernel_module_init_tracepoint(struct kmodleak_bpf *skel)
 {
-	bpf_program__set_autoload(skel->progs.kprobe_return, false);
+	bpf_program__set_autoload(skel->progs.kmodleak__kretprobe__load_module, false);
 }
 
 int handle_event(void *ctx, void *data, size_t data_sz) {
@@ -368,7 +368,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 	return 0;
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
 	int ret = 0;
 	struct ring_buffer *events = NULL;

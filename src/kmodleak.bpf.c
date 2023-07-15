@@ -235,7 +235,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
 }
 
 SEC("kretprobe/load_module")
-int BPF_KRETPROBE(kprobe_return)
+int BPF_KRETPROBE(kmodleak__kretprobe__load_module)
 {
 	struct data_t *mod_init_data;
 
