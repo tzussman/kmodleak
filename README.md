@@ -46,7 +46,7 @@ $ git clone --recurse-submodules https://github.com/tzussman/kmodleak
 
 Makefile build:
 
-```shell
+```console
 $ git submodule update --init --recursive       # check out libbpf
 $ cd src
 $ make
@@ -87,7 +87,7 @@ posting question online.
 
 For `./kmodleak`, run it in verbose mode (`-v`) to see libbpf debug logs:
 
-```shell
+```console
 $ sudo ./kmodleak -v leak
 using page size: 4096
 libbpf: loading object 'kmodleak_bpf' from buffer
