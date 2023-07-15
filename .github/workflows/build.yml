@@ -43,7 +43,7 @@ jobs:
     - name: Build examples/c
       run: |
         docker run \
-          -v $(pwd):/libbpf-bootstrap \
+          -v $(pwd):/kmodleak \
           build_container \
           /bin/bash -c \
           'cd /kmodleak/src && make -j`nproc`'
