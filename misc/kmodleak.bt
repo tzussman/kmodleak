@@ -1,0 +1,25 @@
+#include <linux/module.h>
+
+/*tracepoint:module:module_load
+{
+    printf("pid is %d\n", pid);
+    printf("testing args: %s\n", str(args->data_loc_name));
+}
+*/
+
+rawtracepoint:module_load
+/ ((struct module *)arg0)->name == str($1) /
+{
+    //printf("Testing args: %llx\n", arg0);
+    printf("Module name: %s\n", ((struct module *)arg0)->name);
+    //printf("Addresses: %llx\n", ((struct module *)arg0)->mem[MOD_TEXT].base);
+    printf("Address: %llx, size: %llx\n", ((struct module *)arg0)->core_layout.base, ((struct module *)arg0)->core_layout.size);
+    print(kstack);
+}
+
+// Called after load_module allocates memory
+/*kprobe:do_init_module
+{
+    printf("name: %s\n", ((struct module *)arg0)->name);
+    printf("start address"
+}*/
