@@ -57,7 +57,7 @@ struct allocation {
 
 const char *argp_program_version = "kmodleak 0.1";
 const char *argp_program_bug_address =
-	"https://github.com/iovisor/bcc/tree/master/libbpf-tools";
+	"https://github.com/tzussman/kmodleak";
 
 const char argp_args_doc[] =
 "Trace outstanding memory allocations from a kernel module.\n"
