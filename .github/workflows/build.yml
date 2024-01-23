@@ -15,7 +15,7 @@ jobs:
       matrix:
         llvm: [12, 13, 14, 15, 16, 17, 18]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
     - name: Build container (20.04)
