@@ -20,7 +20,7 @@ jobs:
         submodules: recursive
     - name: Build container (20.04)
       if: ${{ matrix.llvm < 14 }}
-      uses: docker/build-push-action@v3
+      uses: docker/build-push-action@v5
       with:
         push: false
         build-args: |
@@ -31,7 +31,7 @@ jobs:
         tags: build_container
     - name: Build container (22.04)
       if: ${{ matrix.llvm >= 14 }}
-      uses: docker/build-push-action@v3
+      uses: docker/build-push-action@v5
       with:
         push: false
         build-args: |
