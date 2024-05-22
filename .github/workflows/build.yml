@@ -50,6 +50,7 @@ jobs:
     - name: Run kmodleak test
       run: |
         docker run \
+          --privileged \
           -v $(pwd):/kmodleak \
           -v /lib/modules:/lib/modules \
           build_container \
