@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y \
       llvm-${LLVM_VERSION}-dev \
       llvm-${LLVM_VERSION}-runtime \
       libllvm${LLVM_VERSION} \
+      linux-headers-$(uname -r) \
       make pkg-config \
       sudo \
       && apt-get -y clean
