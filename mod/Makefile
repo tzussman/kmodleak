@@ -1,4 +1,4 @@
-obj-m += leak.o
+obj-m += leak.o noleak.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
