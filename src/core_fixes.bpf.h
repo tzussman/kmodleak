@@ -115,8 +115,6 @@ enum mod_mem_type___x {
 	MOD_INVALID___x = -1,
 };
 
-#define MODULE_NAME_LEN		56  /* /include/linux/module.h */
-
 struct module_memory___x {
 	void *base;
 	unsigned int size;
