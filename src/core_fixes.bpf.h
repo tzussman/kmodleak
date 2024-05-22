@@ -93,4 +93,67 @@ static __always_inline bool has_kmem_alloc(void)
 	return false;
 }
 
+/**
+ * commit ac3b43283923("module: replace module_layout with module_memory")
+ * changed the layout of struct module's memory layout. The `core_layout` and
+ * `init_layout` fields are replaced by a `mem` field.
+ * see:
+ *    https://github.com/torvalds/linux/commit/ac3b43283923
+ */
+
+/* /include/linux/module.h v6.4+ */
+enum mod_mem_type___x {
+	MOD_TEXT___x = 0,
+	MOD_DATA___x,
+	MOD_RODATA___x,
+	MOD_RO_AFTER_INIT___x,
+	MOD_INIT_TEXT___x,
+	MOD_INIT_DATA___x,
+	MOD_INIT_RODATA___x,
+
+	MOD_MEM_NUM_TYPES___x,
+	MOD_INVALID___x = -1,
+};
+
+#define MODULE_NAME_LEN		56  /* /include/linux/module.h */
+
+struct module_memory___x {
+	void *base;
+	unsigned int size;
+} __attribute__((preserve_access_index));
+
+struct module___x {
+	const char name[MODULE_NAME_LEN];
+	struct module_memory___x mem[MOD_MEM_NUM_TYPES___x];
+} __attribute__((preserve_access_index));
+
+struct module_layout___x {
+	void *base;
+	unsigned int size;
+} __attribute__((preserve_access_index));
+
+struct module___o {
+	const char name[MODULE_NAME_LEN];
+	struct module_layout___x core_layout;
+	struct module_layout___x init_layout;
+} __attribute__((preserve_access_index));
+
+static __always_inline void fill_module_text_layout(void *module, __u64 *text_base,
+	__u64 *text_size, __u64 *init_text_base, __u64 *init_text_size) {
+
+	struct module___x *mod = (struct module___x *)module;
+	if (bpf_core_field_exists(mod->mem)) { // >= v6.4
+		*text_base = (__u64)BPF_CORE_READ(mod, mem[MOD_TEXT___x].base);
+		*text_size = BPF_CORE_READ(mod, mem[MOD_TEXT___x].size);
+		*init_text_base = (__u64)BPF_CORE_READ(mod, mem[MOD_INIT_TEXT___x].base);
+		*init_text_size = BPF_CORE_READ(mod, mem[MOD_INIT_TEXT___x].size);
+	} else { // < v6.4
+		struct module___o *mod_o = (struct module___o *)module;
+		*text_base = (__u64)BPF_CORE_READ(mod_o, core_layout.base);
+		*text_size = BPF_CORE_READ(mod_o, core_layout.size);
+		*init_text_base = (__u64)BPF_CORE_READ(mod_o, init_layout.base);
+		*init_text_size = BPF_CORE_READ(mod_o, init_layout.size);
+	}
+}
+
 #endif /* __CORE_FIXES_BPF_H */

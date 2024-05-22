@@ -70,6 +70,10 @@ struct {
 	__uint(max_entries, 1);
 } tmp_stack_traces SEC(".maps");
 
+static __always_inline bool module_loaded(void) {
+	return module_base != 0 && module_size != 0;
+}
+
 static int gen_alloc_enter(size_t size)
 {
 	const pid_t pid = bpf_get_current_pid_tgid() >> 32;
@@ -163,7 +167,7 @@ static int validate_stack(void *ctx) {
 	u32 key = 0;
 
 	// module not loaded yet
-	if (module_base == 0 || module_size == 0)
+	if (!module_loaded())
 		return -1;
 
 	data = bpf_map_lookup_elem(&tmp_stack_traces, &key);
@@ -203,7 +207,7 @@ static inline int strncmp_mod(const char *s1, const char *s2) {
 SEC("raw_tracepoint/module_load")
 int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
 {
-	struct module *mod = (struct module *)BPF_CORE_READ(ctx, args[0]);
+	struct module___x *mod = (struct module___x *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
 	u64 base, size;
 	struct data_t *mod_loaded;
@@ -214,12 +218,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
 	if (strncmp_mod(modname, (const char *)modtarget) != 0)
 			return 0;
 
-	// TODO: check for existence of struct module_layout and adjust accordingly
-
-	module_base = (u64)BPF_CORE_READ(mod, core_layout.base);
-	module_size = BPF_CORE_READ(mod, core_layout.size);
-	module_init_base = (u64)BPF_CORE_READ(mod, init_layout.base);
-	module_init_size = BPF_CORE_READ(mod, init_layout.size);
+	fill_module_text_layout(mod, &module_base, &module_size, &module_init_base, &module_init_size);
 
 	modload_pid_tgid = bpf_get_current_pid_tgid();
 
@@ -333,7 +332,7 @@ int kmodleak__kfree(void *ctx)
 	const void *ptr;
 
 	// module not loaded yet
-	if (module_base == 0 || module_size == 0)
+	if (!module_loaded())
 		return 0;
 
 	if (has_kfree()) {
@@ -401,7 +400,7 @@ int kmodleak__kmem_cache_free(void *ctx)
 	const void *ptr;
 
 	// module not loaded yet
-	if (module_base == 0 || module_size == 0)
+	if (!module_loaded())
 		return 0;
 
 	if (has_kmem_cache_free()) {
@@ -430,7 +429,7 @@ SEC("tracepoint/kmem/mm_page_free")
 int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx)
 {
 	// module not loaded yet
-	if (module_base == 0 || module_size == 0)
+	if (!module_loaded())
 		return 0;
 
 	return gen_free_enter((void *)ctx->pfn);
@@ -451,7 +450,7 @@ SEC("tracepoint/percpu/percpu_free_percpu")
 int kmodleak__percpu_free_percpu(struct trace_event_raw_percpu_free_percpu *ctx)
 {
 	// module not loaded yet
-	if (module_base == 0 || module_size == 0)
+	if (!module_loaded())
 		return 0;
 
 	return gen_free_enter(ctx->ptr);

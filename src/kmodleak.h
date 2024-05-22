@@ -3,7 +3,6 @@
 
 #define ALLOCS_MAX_ENTRIES		1000000
 
-#define MODULE_NAME_LEN			56  /* /include/linux/module.h */
 #define PERF_MAX_STACK_DEPTH	127 /* /include/uapi/linux/perf_event.h */
 
 struct alloc_info {
