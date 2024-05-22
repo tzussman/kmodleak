@@ -47,3 +47,11 @@ jobs:
           build_container \
           /bin/bash -c \
           'cd /kmodleak/src && make -j`nproc`'
+    - name: Run kmodleak test
+      run: |
+        docker run \
+          -v $(pwd):/kmodleak \
+          -v /lib/modules:/lib/modules \
+          build_container \
+          /bin/bash -c \
+          'cd /kmodleak/mod && make && ./test.sh'
