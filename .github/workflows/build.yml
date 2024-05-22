@@ -46,4 +46,4 @@ jobs:
           -v $(pwd):/kmodleak \
           build_container \
           /bin/bash -c \
-          'cd /kmodleak/src && make -j`nproc`'
+          'cd /kmodleak/src && make -j`nproc` && cd  ../mod && make && ./test.sh'
