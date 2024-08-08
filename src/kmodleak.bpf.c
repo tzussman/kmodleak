@@ -6,7 +6,7 @@
 #include "core_fixes.bpf.h"
 
 const volatile size_t page_size = 4096;
-const volatile char modtarget[56] = "";
+const volatile char modtarget[MODULE_NAME_LEN] = "";
 const volatile bool trace_all = false;
 
 __u64 module_base = 0;
