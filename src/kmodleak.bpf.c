@@ -32,23 +32,9 @@ struct {
 } allocs SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u64);
-	__type(value, u64);
-	__uint(max_entries, 10240);
-} memptrs SEC(".maps");
-
-struct {
 	__uint(type, BPF_MAP_TYPE_STACK_TRACE);
 	__type(key, u32);
 } stack_traces SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__type(key, u32);
-	__type(value, u64);
-	__uint(max_entries, 2);
-} module_data SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
