@@ -357,6 +357,16 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 		
 		disable_kernel_module_load_tracepoint(skel);
 
+		/*
+		 * Module symbols are only added to kallsyms after the module is
+		 * loaded.
+		 */
+		ksyms = ksyms__load();
+		if (!ksyms) {
+			fprintf(stderr, "Failed to load ksyms\n");
+			return -1;
+		}
+
 		printf("module '%s' loaded\n", env.modname);
 	} else if (d->val == MOD_INITIALIZED) {
 		disable_kernel_module_init_tracepoint(skel);
@@ -473,14 +483,6 @@ int main(int argc, char **argv)
 	if (!events) {
 		ret = 1;
 		fprintf(stderr, "Failed to create ring buffer\n");
-
-		goto cleanup;
-	}
-
-	ksyms = ksyms__load();
-	if (!ksyms) {
-		fprintf(stderr, "Failed to load ksyms\n");
-		ret = -ENOMEM;
 
 		goto cleanup;
 	}
