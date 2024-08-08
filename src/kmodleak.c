@@ -88,7 +88,7 @@ struct ksyms *ksyms;
 
 static struct kmodleak_bpf *skel = NULL;
 
-static bool mod_loaded = 0;
+static bool mod_loaded = false;
 
 error_t argp_parse_arg(int key, char *arg, struct argp_state *state)
 {
@@ -348,7 +348,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 	const struct data_t *d = data;
 
 	if (d->val == MOD_LOADED) {
-		mod_loaded = 1;
+		mod_loaded = true;
 		
 		disable_kernel_module_load_tracepoint(skel);
 
@@ -356,7 +356,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 	} else if (d->val == MOD_INITIALIZED) {
 		disable_kernel_module_init_tracepoint(skel);
 	} else if (d->val == MOD_FREED) {
-		if (mod_loaded != 1) {
+		if (!mod_loaded) {
 			fprintf(stderr, "error: module '%s' freed before loaded\n", env.modname);
 			return -1;
 		}
