@@ -9,9 +9,6 @@ const volatile size_t page_size = 4096;
 const volatile char modtarget[56] = "";
 const volatile bool trace_all = false;
 
-const int MODULE_BASE_INDEX = 0;
-const int MODULE_SIZE_INDEX = 1;
-
 __u64 module_base = 0;
 __u64 module_size = 0;
 __u64 module_init_base = 0;
