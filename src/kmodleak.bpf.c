@@ -19,13 +19,6 @@ bool mod_initialized = false;
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, pid_t);
-	__type(value, u64);
-	__uint(max_entries, 10240);
-} sizes SEC(".maps");
-
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u64); /* address */
 	__type(value, struct alloc_info);
 	__uint(max_entries, ALLOCS_MAX_ENTRIES);
@@ -57,30 +50,12 @@ static __always_inline bool module_loaded(void) {
 	return module_base != 0 && module_size != 0;
 }
 
-static int gen_alloc_enter(size_t size)
+static int gen_alloc_exit2(void *ctx, u64 address, size_t size)
 {
-	const pid_t pid = bpf_get_current_pid_tgid() >> 32;
-	bpf_map_update_elem(&sizes, &pid, &size, BPF_ANY);
-
-	if (trace_all)
-		bpf_printk("alloc entered, size = %lu\n", size);
-
-	return 0;
-}
-
-static int gen_alloc_exit2(void *ctx, u64 address)
-{
-	const pid_t pid = bpf_get_current_pid_tgid() >> 32;
 	struct alloc_info info;
 
-	const u64* size = bpf_map_lookup_elem(&sizes, &pid);
-	if (!size)
-		return 0; // missed alloc entry
-
 	__builtin_memset(&info, 0, sizeof(info));
-
-	info.size = *size;
-	bpf_map_delete_elem(&sizes, &pid);
+	info.size = size;
 
 	if (address != 0) {
 		info.stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
@@ -275,9 +250,7 @@ int kmodleak__kmalloc(void *ctx)
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 	}
 
-	gen_alloc_enter(bytes_alloc);
-
-	return gen_alloc_exit2(ctx, (u64)ptr);
+	return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
 }
 
 SEC("tracepoint/kmem/kmalloc_node")
@@ -295,9 +268,7 @@ int kmodleak__kmalloc_node(void *ctx)
 		ptr = BPF_CORE_READ(args, ptr);
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 
-		gen_alloc_enter(bytes_alloc);
-
-		return gen_alloc_exit2(ctx, (u64)ptr);
+		return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
 	} else {
 		/* tracepoint is disabled if not exist, avoid compile warning */
 		return 0;
@@ -343,9 +314,7 @@ int kmodleak__kmem_cache_alloc(void *ctx)
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 	}
 
-	gen_alloc_enter(bytes_alloc);
-
-	return gen_alloc_exit2(ctx, (u64)ptr);
+	return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
 }
 
 SEC("tracepoint/kmem/kmem_cache_alloc_node")
@@ -363,9 +332,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx)
 		ptr = BPF_CORE_READ(args, ptr);
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 
-		gen_alloc_enter(bytes_alloc);
-
-		return gen_alloc_exit2(ctx, (u64)ptr);
+		return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
 	} else {
 		/* tracepoint is disabled if not exist, avoid compile warning */
 		return 0;
@@ -398,9 +365,7 @@ int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx)
 	if (!called_from_module(ctx))
 		return 0;
 
-	gen_alloc_enter(page_size << ctx->order);
-
-	return gen_alloc_exit2(ctx, ctx->pfn);
+	return gen_alloc_exit2(ctx, ctx->pfn, page_size << ctx->order);
 }
 
 SEC("tracepoint/kmem/mm_page_free")
@@ -419,9 +384,7 @@ int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ct
 	if (!called_from_module(ctx))
 		return 0;
 
-	gen_alloc_enter(ctx->bytes_alloc);
-
-	return gen_alloc_exit2(ctx, (u64)(ctx->ptr));
+	return gen_alloc_exit2(ctx, (u64)(ctx->ptr), ctx->bytes_alloc);
 }
 
 SEC("tracepoint/percpu/percpu_free_percpu")
