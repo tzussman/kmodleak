@@ -59,14 +59,11 @@ static int gen_alloc_exit2(void *ctx, u64 address, size_t size)
 
 	if (address != 0) {
 		info.stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
-
 		bpf_map_update_elem(&allocs, &address, &info, BPF_ANY);
 	}
 
-	if (trace_all) {
-		bpf_printk("alloc exited, size = %lu, result = %lx\n",
-				info.size, address);
-	}
+	if (trace_all)
+		bpf_printk("alloc exited, address = %lx, size = %lu\n", address, info.size);
 
 	return 0;
 }
@@ -81,10 +78,8 @@ static int gen_free_enter(const void *address)
 
 	bpf_map_delete_elem(&allocs, &addr);
 
-	if (trace_all) {
-		bpf_printk("free entered, address = %lx, size = %lu\n",
-				address, info->size);
-	}
+	if (trace_all)
+		bpf_printk("free entered, address = %lx, size = %lu\n", address, info->size);
 
 	return 0;
 }
@@ -169,7 +164,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
 	if (strncmp_mod(modname, (const char *)modtarget) != 0)
-			return 0;
+		return 0;
 
 	fill_module_text_layout(mod, &module_base, &module_size, &module_init_base, &module_init_size);
 
