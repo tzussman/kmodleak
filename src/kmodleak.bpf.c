@@ -96,11 +96,6 @@ static int gen_alloc_exit2(void *ctx, u64 address)
 	return 0;
 }
 
-static int gen_alloc_exit(struct pt_regs *ctx)
-{
-	return gen_alloc_exit2(ctx, PT_REGS_RC(ctx));
-}
-
 static int gen_free_enter(const void *address)
 {
 	const u64 addr = (u64)address;
@@ -190,7 +185,6 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
 {
 	struct module___x *mod = (struct module___x *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
-	u64 base, size;
 	struct data_t *mod_loaded;
 
 	// mod->name is char[56];
