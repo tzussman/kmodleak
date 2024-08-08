@@ -139,10 +139,15 @@ void print_stack_frames_by_ksyms(uint64_t *stack)
 			break;
 
 		const struct ksym *ksym = ksyms__map_addr(ksyms, addr);
+
+		/*
+		 * Print the stack frames. Give the frame index a field width of 3,
+		 * since the current max stack depth is triple digits.
+		 */
 		if (ksym)
-			printf("\t%zu [<%016lx>] %s+0x%lx\n", i, addr, ksym->name, addr - ksym->addr);
+			printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, ksym->name, addr - ksym->addr);
 		else
-			printf("\t%zu [<%016lx>] <%s>\n", i, addr, "null sym");
+			printf("\t%3zu [<%016lx>] <%s>\n", i, addr, "null sym");
 	}
 }
 
