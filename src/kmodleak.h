@@ -8,7 +8,6 @@
 
 struct alloc_info {
 	__u64 size;
-	__u64 timestamp_ns;
 	int stack_id;
 };
 

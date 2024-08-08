@@ -83,8 +83,6 @@ static int gen_alloc_exit2(void *ctx, u64 address)
 	bpf_map_delete_elem(&sizes, &pid);
 
 	if (address != 0) {
-		info.timestamp_ns = bpf_ktime_get_ns();
-
 		info.stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
 
 		bpf_map_update_elem(&allocs, &address, &info, BPF_ANY);
