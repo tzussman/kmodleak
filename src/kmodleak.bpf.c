@@ -114,41 +114,44 @@ static int gen_free_enter(const void *address)
 	return 0;
 }
 
-static int iterate_stack_trace(struct stack_trace_t *data) {
+static bool iterate_stack_trace(struct stack_trace_t *data) {
 	volatile long stack_size = data->kern_stack_size; // verifier hack
 
 	if (!data)
-		return 0;
+		return false;
 
 	if (stack_size > PERF_MAX_STACK_DEPTH)
-		return 0;
+		return false;
 
 	for (u32 i = 0; i < (stack_size & PERF_MAX_STACK_DEPTH); i++) {
 		u64 ip = data->kern_stack[i & PERF_MAX_STACK_DEPTH];
 
 		// ip is located in the module's VM area
 		if (module_base <= ip && ip < module_base + module_size)
-			return 1;
+			return true;
 
 		// ip is located in the module's init area (before initialization completed)
 		if (!mod_initialized && module_init_base <= ip && ip < module_init_base + module_init_size)
-			return 1;
+			return true;
 	}
 
-	return 0;
+	return false;
 }
 
-static int validate_stack(void *ctx) {
+/*
+ * Checks if the callsite passed through the specified module's text sections.
+ */
+static bool called_from_module(void *ctx) {
 	struct stack_trace_t *data;
 	u32 key = 0;
 
 	// module not loaded yet
 	if (!module_loaded())
-		return -1;
+		return false;
 
 	data = bpf_map_lookup_elem(&tmp_stack_traces, &key);
 	if (!data)
-		return -1;
+		return false;
 
 	data->kern_stack_size = bpf_get_stack(ctx, data->kern_stack, sizeof(data->kern_stack), 0);
 
@@ -157,13 +160,13 @@ static int validate_stack(void *ctx) {
 
 	if (data->kern_stack_size < 0) {
 		bpf_printk("bpf_get_stack() failed: %d\n", data->kern_stack_size);
-		return -1;
+		return false;
 	}
 
 	if (!iterate_stack_trace(data))
-		return -1;
+		return false;
 
-	return 0;
+	return true;
 }
 
 static inline int strncmp_mod(const char *s1, const char *s2) {
@@ -259,7 +262,7 @@ int kmodleak__kmalloc(void *ctx)
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (validate_stack(ctx) < 0)
+	if (!called_from_module(ctx))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -286,7 +289,7 @@ int kmodleak__kmalloc_node(void *ctx)
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (validate_stack(ctx) < 0)
+		if (!called_from_module(ctx))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -327,7 +330,7 @@ int kmodleak__kmem_cache_alloc(void *ctx)
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (validate_stack(ctx) < 0)
+	if (!called_from_module(ctx))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -354,7 +357,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx)
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (validate_stack(ctx) < 0)
+		if (!called_from_module(ctx))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -392,7 +395,7 @@ int kmodleak__kmem_cache_free(void *ctx)
 SEC("tracepoint/kmem/mm_page_alloc")
 int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx)
 {
-	if (validate_stack(ctx) < 0)
+	if (!called_from_module(ctx))
 		return 0;
 
 	gen_alloc_enter(page_size << ctx->order);
@@ -413,7 +416,7 @@ int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx)
 SEC("tracepoint/percpu/percpu_alloc_percpu")
 int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ctx)
 {
-	if (validate_stack(ctx) < 0)
+	if (!called_from_module(ctx))
 		return 0;
 
 	gen_alloc_enter(ctx->bytes_alloc);
