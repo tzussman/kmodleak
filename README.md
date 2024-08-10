@@ -55,23 +55,24 @@ using page size: 4096
 Tracing module memory allocs... Unload module (or hit Ctrl-C) to end
 module 'leak' loaded
 module 'leak' unloaded
-[19:56:56] Top 1 stacks with outstanding allocations:
+
+1 stacks with outstanding allocations:
 128 bytes in 1 allocations from stack
-        addr = 0xffff000086586a80 size = 128
-        0 [<ffff8000102ab2c8>] __traceiter_kmalloc+0x68
-        1 [<ffff8000102ab2c8>] __traceiter_kmalloc+0x68
-        2 [<ffff80001031d7f0>] kmem_cache_alloc_trace+0x25c
-        3 [<ffff800008db8038>] efivarfs_exit+0x5084
-        4 [<ffff800010013630>] do_one_initcall+0x50
-        5 [<ffff80001016fc40>] do_init_module+0x60
-        6 [<ffff800010172270>] load_module+0x2290
-        7 [<ffff800010038810>] kretprobe_trampoline+0x0
-        8 [<ffff800010172a8c>] __arm64_sys_finit_module+0x2c
-        9 [<ffff800010027d10>] el0_svc_common+0x70
-        10 [<ffff800010027e14>] do_el0_svc+0x34
-        11 [<ffff800010bc448c>] el0_svc+0x2c
-        12 [<ffff800010bc4b34>] el0_sync_handler+0x1a4
-        13 [<ffff800010011db4>] el0_sync+0x174
+        addr = 0xffff00008ba60f00 size = 128
+          0 [<ffff80000834df84>] kmalloc_trace+0xf0
+          1 [<ffff80000834df84>] kmalloc_trace+0xf0
+          2 [<ffff800032f2f060>] leak_init+0x34
+          3 [<ffff800008074dd0>] do_one_initcall+0x60
+          4 [<ffff8000081b3404>] do_init_module+0x50
+          5 [<ffff8000081b5458>] load_module+0x1cb8
+          6 [<ffff8000081b5c7c>] __do_sys_finit_module+0xac
+          7 [<ffff8000081b5d88>] __arm64_sys_finit_module+0x28
+          8 [<ffff800008089bd8>] invoke_syscall+0x78
+          9 [<ffff800008089cac>] el0_svc_common.constprop.0+0x4c
+         10 [<ffff800008089d88>] do_el0_svc+0x34
+         11 [<ffff800008d03794>] el0_svc+0x34
+         12 [<ffff800008d04cd4>] el0t_64_sync_handler+0xf4
+         13 [<ffff800008071548>] el0t_64_sync+0x18c
 done
 ```
 
