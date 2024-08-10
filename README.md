@@ -7,10 +7,15 @@ For full functionality, it requires loading and unloading the target module
 while it is running. Once the module is unloaded, `kmodleak` will terminate
 automatically, and display a summary of the leaks.
 
+#### Credits
+
 *The infrastructure in this repo was taken from
 [libbpf-bootstrap](https://github.com/libbpf/libbpf-bootstrap/).*
 *`kmodleak`'s design is inspired by and based on
-[`memleak`](https://github.com/iovisor/bcc/blob/master/libbpf-tools/memleak.c) from BCC.*
+[`memleak`](https://github.com/iovisor/bcc/blob/master/libbpf-tools/memleak.c)
+from BCC.*
+*`kmodleak` was also inspired by [`KEDR`](https://github.com/euspectre/kedr) and
+is intended to serve as a lightweight replacement for its memory leak detector.*
 
 ## Setup
 
