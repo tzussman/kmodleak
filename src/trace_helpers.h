@@ -30,8 +30,7 @@ struct ksyms {
 #define DEBUGFS "/sys/kernel/debug/tracing"
 #define TRACEFS "/sys/kernel/tracing"
 
-static inline bool use_debugfs(void)
-{
+static inline bool use_debugfs(void) {
 	static int has_debugfs = -1;
 
 	if (has_debugfs < 0)
@@ -40,13 +39,11 @@ static inline bool use_debugfs(void)
 	return has_debugfs == 1;
 }
 
-static inline const char *tracefs_path(void)
-{
+static inline const char *tracefs_path(void) {
 	return use_debugfs() ? DEBUGFS : TRACEFS;
 }
 
-static inline bool tracepoint_exists(const char *category, const char *event)
-{
+static inline bool tracepoint_exists(const char *category, const char *event) {
 	char path[PATH_MAX];
 
 	snprintf(path, sizeof(path), "%s/events/%s/%s/format", tracefs_path(), category, event);
@@ -55,8 +52,7 @@ static inline bool tracepoint_exists(const char *category, const char *event)
 	return false;
 }
 
-static inline int ksyms__add_symbol(struct ksyms *ksyms, const char *name, unsigned long addr)
-{
+static inline int ksyms__add_symbol(struct ksyms *ksyms, const char *name, unsigned long addr) {
 	size_t new_cap, name_len = strlen(name) + 1;
 	struct ksym *ksym;
 	void *tmp;
@@ -96,8 +92,7 @@ static inline int ksyms__add_symbol(struct ksyms *ksyms, const char *name, unsig
 	return 0;
 }
 
-static inline int ksym_cmp(const void *p1, const void *p2)
-{
+static inline int ksym_cmp(const void *p1, const void *p2) {
 	const struct ksym *s1 = p1, *s2 = p2;
 
 	if (s1->addr == s2->addr)
@@ -105,8 +100,7 @@ static inline int ksym_cmp(const void *p1, const void *p2)
 	return s1->addr < s2->addr ? -1 : 1;
 }
 
-static inline void ksyms__free(struct ksyms *ksyms)
-{
+static inline void ksyms__free(struct ksyms *ksyms) {
 	if (!ksyms)
 		return;
 
@@ -115,8 +109,7 @@ static inline void ksyms__free(struct ksyms *ksyms)
 	free(ksyms);
 }
 
-static inline struct ksyms *ksyms__load(void)
-{
+static inline struct ksyms *ksyms__load(void) {
 	char sym_type, sym_name[256];
 	struct ksyms *ksyms;
 	unsigned long sym_addr;
@@ -158,8 +151,7 @@ err_out:
 }
 
 static inline const struct ksym *ksyms__map_addr(const struct ksyms *ksyms,
-				   unsigned long addr)
-{
+				   unsigned long addr) {
 	int start = 0, end = ksyms->syms_sz - 1, mid;
 	unsigned long sym_addr;
 
@@ -180,8 +172,7 @@ static inline const struct ksym *ksyms__map_addr(const struct ksyms *ksyms,
 }
 
 static inline const struct ksym *ksyms__get_symbol(const struct ksyms *ksyms,
-					 const char *name)
-{
+					 const char *name) {
 	int i;
 
 	for (i = 0; i < ksyms->syms_sz; i++) {
@@ -192,8 +183,7 @@ static inline const struct ksym *ksyms__get_symbol(const struct ksyms *ksyms,
 	return NULL;
 }
 
-static inline bool is_kernel_module(const char *name)
-{
+static inline bool is_kernel_module(const char *name) {
 	bool found = false;
 	char buf[64];
 	FILE *f;

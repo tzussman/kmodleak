@@ -50,8 +50,7 @@ static __always_inline bool module_loaded(void) {
 	return module_base != 0 && module_size != 0;
 }
 
-static int gen_alloc_exit2(void *ctx, u64 address, size_t size)
-{
+static int gen_alloc_exit2(void *ctx, u64 address, size_t size) {
 	struct alloc_info info;
 
 	__builtin_memset(&info, 0, sizeof(info));
@@ -68,8 +67,7 @@ static int gen_alloc_exit2(void *ctx, u64 address, size_t size)
 	return 0;
 }
 
-static int gen_free_enter(const void *address)
-{
+static int gen_free_enter(const void *address) {
 	const u64 addr = (u64)address;
 
 	const struct alloc_info *info = bpf_map_lookup_elem(&allocs, &addr);
@@ -153,8 +151,7 @@ static inline int strncmp_mod(const char *s1, const char *s2) {
 }
 
 SEC("raw_tracepoint/module_load")
-int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
-{
+int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 	struct module___x *mod = (struct module___x *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
 	struct data_t *mod_loaded;
@@ -180,8 +177,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
 }
 
 SEC("kretprobe/load_module")
-int BPF_KRETPROBE(kmodleak__kretprobe__load_module)
-{
+int BPF_KRETPROBE(kmodleak__kretprobe__load_module) {
 	struct data_t *mod_init_data;
 
 	if (mod_initialized || modload_pid_tgid != bpf_get_current_pid_tgid())
@@ -201,8 +197,7 @@ int BPF_KRETPROBE(kmodleak__kretprobe__load_module)
 }
 
 SEC("raw_tracepoint/module_free")
-int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx)
-{
+int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 	struct module *mod = (struct module *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
 	struct data_t *mod_unloaded;
@@ -224,8 +219,7 @@ int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx)
 }
 
 SEC("tracepoint/kmem/kmalloc")
-int kmodleak__kmalloc(void *ctx)
-{
+int kmodleak__kmalloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
@@ -246,8 +240,7 @@ int kmodleak__kmalloc(void *ctx)
 }
 
 SEC("tracepoint/kmem/kmalloc_node")
-int kmodleak__kmalloc_node(void *ctx)
-{
+int kmodleak__kmalloc_node(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
@@ -268,8 +261,7 @@ int kmodleak__kmalloc_node(void *ctx)
 }
 
 SEC("tracepoint/kmem/kfree")
-int kmodleak__kfree(void *ctx)
-{
+int kmodleak__kfree(void *ctx) {
 	const void *ptr;
 
 	if (!module_loaded())
@@ -287,8 +279,7 @@ int kmodleak__kfree(void *ctx)
 }
 
 SEC("tracepoint/kmem/kmem_cache_alloc")
-int kmodleak__kmem_cache_alloc(void *ctx)
-{
+int kmodleak__kmem_cache_alloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
@@ -309,8 +300,7 @@ int kmodleak__kmem_cache_alloc(void *ctx)
 }
 
 SEC("tracepoint/kmem/kmem_cache_alloc_node")
-int kmodleak__kmem_cache_alloc_node(void *ctx)
-{
+int kmodleak__kmem_cache_alloc_node(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
@@ -331,8 +321,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx)
 }
 
 SEC("tracepoint/kmem/kmem_cache_free")
-int kmodleak__kmem_cache_free(void *ctx)
-{
+int kmodleak__kmem_cache_free(void *ctx) {
 	const void *ptr;
 
 	if (!module_loaded())
@@ -350,8 +339,7 @@ int kmodleak__kmem_cache_free(void *ctx)
 }
 
 SEC("tracepoint/kmem/mm_page_alloc")
-int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx)
-{
+int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx) {
 	if (!called_from_module(ctx))
 		return 0;
 
@@ -359,8 +347,7 @@ int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx)
 }
 
 SEC("tracepoint/kmem/mm_page_free")
-int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx)
-{
+int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx) {
 	if (!module_loaded())
 		return 0;
 
@@ -368,8 +355,7 @@ int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx)
 }
 
 SEC("tracepoint/percpu/percpu_alloc_percpu")
-int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ctx)
-{
+int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ctx) {
 	if (!called_from_module(ctx))
 		return 0;
 
@@ -377,8 +363,7 @@ int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ct
 }
 
 SEC("tracepoint/percpu/percpu_free_percpu")
-int kmodleak__percpu_free_percpu(struct trace_event_raw_percpu_free_percpu *ctx)
-{
+int kmodleak__percpu_free_percpu(struct trace_event_raw_percpu_free_percpu *ctx) {
 	if (!module_loaded())
 		return 0;
 

@@ -79,8 +79,7 @@ static const struct argp_option argp_options[] = {
 
 static volatile sig_atomic_t exiting;
 
-static void sig_handler(int signo)
-{
+static void sig_handler(int signo) {
 	exiting = 1;
 }
 
@@ -90,8 +89,7 @@ static struct kmodleak_bpf *skel = NULL;
 
 static bool mod_loaded = false;
 
-error_t argp_parse_arg(int key, char *arg, struct argp_state *state)
-{
+error_t argp_parse_arg(int key, char *arg, struct argp_state *state) {
 	static int pos_args = 0;
 
 	switch (key) {
@@ -122,16 +120,14 @@ error_t argp_parse_arg(int key, char *arg, struct argp_state *state)
 	return 0;
 }
 
-int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
-{
+int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args) {
 	if (level == LIBBPF_DEBUG && !env.verbose)
 		return 0;
 
 	return vfprintf(stderr, format, args);
 }
 
-void print_stack_frames_by_ksyms(uint64_t *stack)
-{
+void print_stack_frames_by_ksyms(uint64_t *stack) {
 	for (size_t i = 0; i < env.perf_max_stack_depth; ++i) {
 		const uint64_t addr = stack[i];
 
@@ -151,8 +147,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack)
 	}
 }
 
-int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_traces_fd)
-{
+int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_traces_fd) {
 	int ret = 0;
 
 	uint64_t *stack = calloc(env.perf_max_stack_depth, sizeof(*stack));
@@ -190,8 +185,7 @@ cleanup:
 	return ret;
 }
 
-int alloc_size_compare(const void *a, const void *b)
-{
+int alloc_size_compare(const void *a, const void *b) {
 	const struct allocation *x = (struct allocation *)a;
 	const struct allocation *y = (struct allocation *)b;
 
@@ -205,8 +199,7 @@ int alloc_size_compare(const void *a, const void *b)
 	return 0;
 }
 
-int print_allocs(int allocs_fd, int stack_traces_fd)
-{
+int print_allocs(int allocs_fd, int stack_traces_fd) {
 	size_t nr_allocs = 0;
 	int ret = 0;
 
@@ -321,31 +314,26 @@ cleanup:
 	return ret;
 }
 
-bool has_kernel_node_tracepoints()
-{
+bool has_kernel_node_tracepoints(void) {
 	return tracepoint_exists("kmem", "kmalloc_node") &&
 		tracepoint_exists("kmem", "kmem_cache_alloc_node");
 }
 
-void disable_kernel_node_tracepoints(struct kmodleak_bpf *skel)
-{
+void disable_kernel_node_tracepoints(struct kmodleak_bpf *skel) {
 	bpf_program__set_autoload(skel->progs.kmodleak__kmalloc_node, false);
 	bpf_program__set_autoload(skel->progs.kmodleak__kmem_cache_alloc_node, false);
 }
 
-void disable_kernel_percpu_tracepoints(struct kmodleak_bpf *skel)
-{
+void disable_kernel_percpu_tracepoints(struct kmodleak_bpf *skel) {
 	bpf_program__set_autoload(skel->progs.kmodleak__percpu_alloc_percpu, false);
 	bpf_program__set_autoload(skel->progs.kmodleak__percpu_free_percpu, false);
 }
 
-void disable_kernel_module_load_tracepoint(struct kmodleak_bpf *skel)
-{
+void disable_kernel_module_load_tracepoint(struct kmodleak_bpf *skel) {
 	bpf_program__set_autoload(skel->progs.kmodleak__module_load, false);
 }
 
-void disable_kernel_module_init_tracepoint(struct kmodleak_bpf *skel)
-{
+void disable_kernel_module_init_tracepoint(struct kmodleak_bpf *skel) {
 	bpf_program__set_autoload(skel->progs.kmodleak__kretprobe__load_module, false);
 }
 
@@ -383,8 +371,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 	return 0;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
 	int ret = 0;
 	struct ring_buffer *events = NULL;
 	int modlen;
@@ -396,7 +383,7 @@ int main(int argc, char **argv)
 		.doc = argp_args_doc,
 	};
 
-	// parse command line args to env settings
+	// Parse command line args to env settings
 	if (argp_parse(&argp, argc, argv, 0, NULL, NULL)) {
 		fprintf(stderr, "failed to parse args\n");
 
@@ -407,7 +394,7 @@ int main(int argc, char **argv)
 	sigemptyset(&sa.sa_mask);
 	sa.sa_handler = sig_handler;
 
-	// install signal handler
+	// Install signal handler
 	if (sigaction(SIGINT, &sa, NULL)) {
 		perror("failed to set up signal handling");
 		ret = -errno;
@@ -415,7 +402,7 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	// post-processing and validation of env settings
+	// Post-processing and validation of env settings
 	modlen = strlen(env.modname);
 	if (modlen == 0) {
 		fprintf(stderr, "kmodleak: missing module name\n");
@@ -454,7 +441,7 @@ int main(int argc, char **argv)
 				env.perf_max_stack_depth * sizeof(unsigned long));
 	bpf_map__set_max_entries(skel->maps.stack_traces, env.stack_map_max_entries);
 
-	// disable kernel tracepoints based on settings or availability
+	// Disable kernel tracepoints based on settings or availability
 	if (!has_kernel_node_tracepoints())
 		disable_kernel_node_tracepoints(skel);
 
@@ -478,7 +465,7 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	/* Set up ring buffer polling */
+	// Set up ring buffer polling
 	events = ring_buffer__new(bpf_map__fd(skel->maps.events), handle_event, NULL, NULL);
 	if (!events) {
 		ret = 1;
@@ -489,7 +476,7 @@ int main(int argc, char **argv)
 
 	printf("Tracing module memory allocs... Unload module (or hit Ctrl-C) to end\n");
 
-	// main loop
+	// Main loop
 	while (!exiting) {
 		ret = ring_buffer__poll(events, -1); // infinite timeout
 		

@@ -30,15 +30,13 @@ struct trace_event_raw_kmem_cache_free___x {
 	const void *ptr;
 } __attribute__((preserve_access_index));
 
-static __always_inline bool has_kfree()
-{
+static __always_inline bool has_kfree(void) {
 	if (bpf_core_type_exists(struct trace_event_raw_kfree___x))
 		return true;
 	return false;
 }
 
-static __always_inline bool has_kmem_cache_free()
-{
+static __always_inline bool has_kmem_cache_free(void) {
 	if (bpf_core_type_exists(struct trace_event_raw_kmem_cache_free___x))
 		return true;
 	return false;
@@ -56,8 +54,7 @@ struct trace_event_raw_kmem_alloc_node___x {
 	size_t bytes_alloc;
 } __attribute__((preserve_access_index));
 
-static __always_inline bool has_kmem_alloc_node(void)
-{
+static __always_inline bool has_kmem_alloc_node(void) {
 	if (bpf_core_type_exists(struct trace_event_raw_kmem_alloc_node___x))
 		return true;
 	return false;
@@ -86,8 +83,7 @@ struct trace_event_raw_kmem_cache_alloc___x {
 	size_t bytes_alloc;
 } __attribute__((preserve_access_index));
 
-static __always_inline bool has_kmem_alloc(void)
-{
+static __always_inline bool has_kmem_alloc(void) {
 	if (bpf_core_type_exists(struct trace_event_raw_kmem_alloc___x))
 		return true;
 	return false;
