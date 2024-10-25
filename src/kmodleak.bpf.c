@@ -115,7 +115,6 @@ static bool called_from_module(void *ctx) {
 	struct stack_trace_t *data;
 	u32 key = 0;
 
-	// module not loaded yet
 	if (!module_loaded())
 		return false;
 
@@ -160,7 +159,6 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx)
 	char modname[MODULE_NAME_LEN];
 	struct data_t *mod_loaded;
 
-	// mod->name is char[56];
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
 	if (strncmp_mod(modname, (const char *)modtarget) != 0)
@@ -209,7 +207,6 @@ int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx)
 	char modname[MODULE_NAME_LEN];
 	struct data_t *mod_unloaded;
 
-	// mod->name is char[56];
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
 	if (strncmp_mod(modname, (const char *)modtarget) != 0)
@@ -265,7 +262,7 @@ int kmodleak__kmalloc_node(void *ctx)
 
 		return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
 	} else {
-		/* tracepoint is disabled if not exist, avoid compile warning */
+		/* tracepoint is disabled if doesn't exist, avoid compile warning */
 		return 0;
 	}
 }
@@ -275,7 +272,6 @@ int kmodleak__kfree(void *ctx)
 {
 	const void *ptr;
 
-	// module not loaded yet
 	if (!module_loaded())
 		return 0;
 
@@ -329,7 +325,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx)
 
 		return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
 	} else {
-		/* tracepoint is disabled if not exist, avoid compile warning */
+		/* tracepoint is disabled if doesn't exist, avoid compile warning */
 		return 0;
 	}
 }
@@ -339,7 +335,6 @@ int kmodleak__kmem_cache_free(void *ctx)
 {
 	const void *ptr;
 
-	// module not loaded yet
 	if (!module_loaded())
 		return 0;
 
@@ -366,7 +361,6 @@ int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx)
 SEC("tracepoint/kmem/mm_page_free")
 int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx)
 {
-	// module not loaded yet
 	if (!module_loaded())
 		return 0;
 
@@ -385,7 +379,6 @@ int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ct
 SEC("tracepoint/percpu/percpu_free_percpu")
 int kmodleak__percpu_free_percpu(struct trace_event_raw_percpu_free_percpu *ctx)
 {
-	// module not loaded yet
 	if (!module_loaded())
 		return 0;
 
