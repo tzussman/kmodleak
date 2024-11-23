@@ -29,9 +29,14 @@ struct {
 	__type(key, u32);
 } stack_traces SEC(".maps");
 
+/*
+ * Only need three entries in this map: loaded, initialized, and unloaded.
+ * `max_entries` for ringbuf maps must be a power of 2 and multiple of the page
+ * size.
+ */
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
-	__uint(max_entries, 3); // loaded, initialized, unloaded
+	__uint(max_entries, 4096);
 } events SEC(".maps");
 
 struct stack_trace_t {
