@@ -9,15 +9,19 @@ run_test() {
     sudo ../src/kmodleak "$module" > "out_$module" &
     kmodleak_pid=$!
 
+    echo "kmodleak running on PID $kmodleak_pid"
+
     echo "Loading module..."
     if ! sudo insmod "$module.ko"; then
         echo "Failed to load module $module"
+        kill $kmodleak_pid
         return 1
     fi
 
     echo "Unloading module..."
     if ! sudo rmmod "$module"; then
         echo "Failed to unload module $module"
+        kill $kmodleak_pid
         return 1
     fi
 
