@@ -5,11 +5,15 @@
 run_test() {
     module=$1
     expected_output=$2
-    echo "Running kmodleak on $module..."
+    echo "Running kmodleak on module '$module'..."
     sudo ../src/kmodleak "$module" > "out_$module" &
     kmodleak_pid=$!
 
     echo "kmodleak running on PID $kmodleak_pid"
+
+    # Sleep so that kmodleak has time to register the BPF programs before the
+    # module is loaded.
+    sleep 1
 
     echo "Loading module..."
     if ! sudo insmod "$module.ko"; then
@@ -25,15 +29,18 @@ run_test() {
         return 1
     fi
 
+    sleep 1
+
     echo "Checking output..."
-    if grep -q "$expected_output" "out_$module"; then
+    if ! grep -q "$expected_output" "out_$module"; then
         echo "Output does not contain expected output"
         return 1
     fi
 
-    echo "Test $module passed."
+    echo "Test '$module' passed."
     echo
     rm "out_$module"
+    wait $kmodleak_pid
 }
 
 # Run tests
