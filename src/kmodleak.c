@@ -10,15 +10,15 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <bpf/libbpf.h>
 #include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 
 #include "kmodleak.h"
 #include "kmodleak.skel.h"
@@ -45,35 +45,34 @@ static struct env {
 struct allocation_node {
 	uint64_t address;
 	size_t size;
-	struct allocation_node* next;
+	struct allocation_node *next;
 };
 
 struct allocation {
 	uint64_t stack_id;
 	size_t size;
 	size_t count;
-	struct allocation_node* allocations;
+	struct allocation_node *allocations;
 };
 
 const char *argp_program_version = "kmodleak 0.1";
-const char *argp_program_bug_address =
-	"https://github.com/tzussman/kmodleak";
+const char *argp_program_bug_address = "https://github.com/tzussman/kmodleak";
 
 const char argp_args_doc[] =
-"Trace outstanding memory allocations from a kernel module.\n"
-"\n"
-"USAGE: kmodleak [--help] [-t] [-P] [modname]\n"
-"\n"
-"EXAMPLES:\n"
-"./kmodleak module\n"
-"        Trace allocations from 'module' and display leaks on unload.\n"
-"";
+	"Trace outstanding memory allocations from a kernel module.\n"
+	"\n"
+	"USAGE: kmodleak [--help] [-t] [-P] [modname]\n"
+	"\n"
+	"EXAMPLES:\n"
+	"./kmodleak module\n"
+	"        Trace allocations from 'module' and display leaks on unload.\n"
+	"";
 
 static const struct argp_option argp_options[] = {
 	// name/longopt:str, key/shortopt:int, arg:str, flags:int, doc:str
-	{"trace", 't', 0, 0, "print trace messages for each alloc/free call" },
-	{"percpu", 'P', NULL, 0, "trace percpu allocations"},
-	{"verbose", 'v', NULL, 0, "print extra messages"},
+	{ "trace", 't', 0, 0, "print trace messages for each alloc/free call" },
+	{ "percpu", 'P', NULL, 0, "trace percpu allocations" },
+	{ "verbose", 'v', NULL, 0, "print extra messages" },
 	{},
 };
 
@@ -141,7 +140,8 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 		 * since the current max stack depth is triple digits.
 		 */
 		if (ksym)
-			printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, ksym->name, addr - ksym->addr);
+			printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, ksym->name,
+			       addr - ksym->addr);
 		else
 			printf("\t%3zu [<%016lx>] <%s>\n", i, addr, "null sym");
 	}
@@ -161,7 +161,7 @@ int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_tr
 
 		printf("%zu bytes in %zu allocations from stack\n", alloc->size, alloc->count);
 
-		struct allocation_node* it = alloc->allocations;
+		struct allocation_node *it = alloc->allocations;
 		while (it != NULL) {
 			printf("\taddr = %#lx size = %zu\n", it->address, it->size);
 			it = it->next;
@@ -249,7 +249,8 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 				alloc->size += alloc_info.size;
 				alloc->count++;
 
-				struct allocation_node* node = malloc(sizeof(struct allocation_node));
+				struct allocation_node *node =
+					malloc(sizeof(struct allocation_node));
 				if (!node) {
 					perror("malloc failed");
 					ret = -errno;
@@ -268,16 +269,16 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 		if (stack_exists)
 			continue;
 
-		// when the stack_id does not exist in the allocs array,
-		//   create a new entry in the array
+		// When the stack_id does not exist in the allocs array,
+		// create a new entry in the array
 		struct allocation alloc = {
 			.stack_id = alloc_info.stack_id,
 			.size = alloc_info.size,
 			.count = 1,
-			.allocations = NULL
+			.allocations = NULL,
 		};
 
-		struct allocation_node* node = malloc(sizeof(struct allocation_node));
+		struct allocation_node *node = malloc(sizeof(struct allocation_node));
 		if (!node) {
 			perror("malloc failed");
 			ret = -errno;
@@ -316,7 +317,7 @@ cleanup:
 
 bool has_kernel_node_tracepoints(void) {
 	return tracepoint_exists("kmem", "kmalloc_node") &&
-		tracepoint_exists("kmem", "kmem_cache_alloc_node");
+	       tracepoint_exists("kmem", "kmem_cache_alloc_node");
 }
 
 void disable_kernel_node_tracepoints(struct kmodleak_bpf *skel) {
@@ -342,7 +343,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 
 	if (d->val == MOD_LOADED) {
 		mod_loaded = true;
-		
+
 		disable_kernel_module_load_tracepoint(skel);
 
 		/*
@@ -410,14 +411,15 @@ int main(int argc, char **argv) {
 	}
 
 	if (modlen >= MODULE_NAME_LEN) {
-		fprintf(stderr, "module name '%s' too long; must be < %d chars\n",
-				env.modname, MODULE_NAME_LEN);
+		fprintf(stderr, "module name '%s' too long; must be < %d chars\n", env.modname,
+			MODULE_NAME_LEN);
 		return 1;
 	}
 
 	// Check if module is already loaded
 	if (is_kernel_module(env.modname)) {
-		fprintf(stderr, "module '%s' is already loaded. Please unload and try again.\n", env.modname);
+		fprintf(stderr, "module '%s' is already loaded. Please unload and try again.\n",
+			env.modname);
 		return 1;
 	}
 
@@ -479,7 +481,7 @@ int main(int argc, char **argv) {
 	// Main loop
 	while (!exiting) {
 		ret = ring_buffer__poll(events, -1); // infinite timeout
-		
+
 		if (ret == -EINTR) {
 			ret = 0;
 			break;

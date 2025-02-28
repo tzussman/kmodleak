@@ -125,8 +125,7 @@ static inline struct ksyms *ksyms__load(void) {
 		goto err_out;
 
 	while (true) {
-		ret = fscanf(f, "%lx %c %s%*[^\n]\n",
-				 &sym_addr, &sym_type, sym_name);
+		ret = fscanf(f, "%lx %c %s%*[^\n]\n", &sym_addr, &sym_type, sym_name);
 		if (ret == EOF && feof(f))
 			break;
 		if (ret != 3)
@@ -150,8 +149,7 @@ err_out:
 	return NULL;
 }
 
-static inline const struct ksym *ksyms__map_addr(const struct ksyms *ksyms,
-				   unsigned long addr) {
+static inline const struct ksym *ksyms__map_addr(const struct ksyms *ksyms, unsigned long addr) {
 	int start = 0, end = ksyms->syms_sz - 1, mid;
 	unsigned long sym_addr;
 
@@ -171,8 +169,7 @@ static inline const struct ksym *ksyms__map_addr(const struct ksyms *ksyms,
 	return NULL;
 }
 
-static inline const struct ksym *ksyms__get_symbol(const struct ksyms *ksyms,
-					 const char *name) {
+static inline const struct ksym *ksyms__get_symbol(const struct ksyms *ksyms, const char *name) {
 	int i;
 
 	for (i = 0; i < ksyms->syms_sz; i++) {

@@ -2,8 +2,8 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
-#include "kmodleak.h"
 #include "core_fixes.bpf.h"
+#include "kmodleak.h"
 
 const volatile size_t page_size = 4096;
 const volatile char modtarget[MODULE_NAME_LEN] = "";
@@ -40,8 +40,8 @@ struct {
 } events SEC(".maps");
 
 struct stack_trace_t {
-        long kern_stack_size;
-        u64 kern_stack[PERF_MAX_STACK_DEPTH + 1];
+	long kern_stack_size;
+	u64 kern_stack[PERF_MAX_STACK_DEPTH + 1];
 };
 
 struct {
@@ -104,7 +104,8 @@ static bool iterate_stack_trace(struct stack_trace_t *data) {
 			return true;
 
 		// ip is located in the module's init area (before initialization completed)
-		if (!mod_initialized && module_init_base <= ip && ip < module_init_base + module_init_size)
+		if (!mod_initialized && module_init_base <= ip &&
+		    ip < module_init_base + module_init_size)
 			return true;
 	}
 
@@ -166,16 +167,17 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 	if (strncmp_mod(modname, (const char *)modtarget) != 0)
 		return 0;
 
-	fill_module_text_layout(mod, &module_base, &module_size, &module_init_base, &module_init_size);
+	fill_module_text_layout(mod, &module_base, &module_size, &module_init_base,
+				&module_init_size);
 
 	modload_pid_tgid = bpf_get_current_pid_tgid();
 
 	mod_loaded = bpf_ringbuf_reserve(&events, sizeof(*mod_loaded), 0);
 	if (!mod_loaded)
 		return 0;
-	
+
 	mod_loaded->val = MOD_LOADED;
-	
+
 	bpf_ringbuf_submit(mod_loaded, 0);
 
 	return 0;
@@ -215,11 +217,11 @@ int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 	mod_unloaded = bpf_ringbuf_reserve(&events, sizeof(*mod_unloaded), 0);
 	if (!mod_unloaded)
 		return 0;
-	
+
 	mod_unloaded->val = MOD_FREED;
-	
+
 	bpf_ringbuf_submit(mod_unloaded, 0);
-			
+
 	return 0;
 }
 

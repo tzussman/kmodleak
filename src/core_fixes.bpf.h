@@ -97,6 +97,10 @@ static __always_inline bool has_kmem_alloc(void) {
  *    https://github.com/torvalds/linux/commit/ac3b43283923
  */
 
+#ifndef MODULE_NAME_LEN
+#define MODULE_NAME_LEN 56 /* /include/linux/module.h */
+#endif
+
 /* /include/linux/module.h v6.4+ */
 enum mod_mem_type___x {
 	MOD_TEXT___x = 0,
@@ -133,8 +137,8 @@ struct module___o {
 } __attribute__((preserve_access_index));
 
 static __always_inline void fill_module_text_layout(void *module, __u64 *text_base,
-	__u64 *text_size, __u64 *init_text_base, __u64 *init_text_size) {
-
+						    __u64 *text_size, __u64 *init_text_base,
+						    __u64 *init_text_size) {
 	struct module___x *mod = (struct module___x *)module;
 	if (bpf_core_field_exists(mod->mem)) { // >= v6.4
 		*text_base = (__u64)BPF_CORE_READ(mod, mem[MOD_TEXT___x].base);
