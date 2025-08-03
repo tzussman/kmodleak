@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        llvm: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+        llvm: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
     steps:
     - uses: actions/checkout@v4
       with:
