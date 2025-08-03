@@ -4,8 +4,9 @@
 
 `kmodleak` is an eBPF tool for tracing Linux kernel module memory leaks.
 For full functionality, it requires loading and unloading the target module
-while it is running. Once the module is unloaded, `kmodleak` will terminate
-automatically, and display a summary of the leaks.
+while it is running. It does NOT load or unload modules itself. Once the module
+is unloaded, `kmodleak` will automatically terminate and display a summary of
+any detected memory leaks.
 
 #### Credits
 
@@ -55,7 +56,7 @@ Makefile build:
 $ git submodule update --init --recursive       # check out libbpf
 $ cd src
 $ make
-$ sudo ./kmodleak leak
+$ sudo ./kmodleak leak  # Module is loaded and unloaded by the user (not shown)
 using page size: 4096
 Tracing module memory allocs... Unload module (or hit Ctrl-C) to end
 module 'leak' loaded
@@ -80,6 +81,50 @@ module 'leak' unloaded
          13 [<ffff800008071548>] el0t_64_sync+0x18c
 done
 ```
+
+## Usage
+
+`kmodleak` monitors kernel module memory allocations and detects leaks. The typical workflow is:
+
+1. **Start kmodleak** - Run `kmodleak` with the module name you want to monitor
+2. **Load the module** - In another terminal, load your kernel module with `insmod`
+3. **Use the module** - Exercise your module's functionality  
+4. **Unload the module** - Remove the module with `rmmod`
+5. **View results** - `kmodleak` automatically exits and shows any detected leaks
+
+### Basic Example
+
+**Terminal 1** - Start monitoring:
+```console
+$ sudo ./kmodleak mymodule
+using page size: 4096
+Tracing module memory allocs... Unload module (or hit Ctrl-C) to end
+```
+
+**Terminal 2** - Load, use, and unload your module:
+```console
+$ sudo insmod mymodule.ko
+$ # Exercise your module's functionality
+$ sudo rmmod mymodule
+```
+
+**Terminal 1** - Results appear automatically:
+```console
+module 'mymodule' loaded
+module 'mymodule' unloaded
+
+1 stacks with outstanding allocations:
+128 bytes in 1 allocations from stack
+        addr = 0xffff00008ba60f00 size = 128
+          0 [<ffff80000834df84>] kmalloc_trace+0xf0
+          1 [<ffff80000834df84>] kmalloc_trace+0xf0
+          2 [<ffff800032f2f060>] mymodule_init+0x34
+          ...
+done
+```
+
+The repository includes a couple sample modules for testing under the `mod`
+directory.
 
 ### Installation
 
