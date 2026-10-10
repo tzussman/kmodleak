@@ -61,12 +61,13 @@ def modules():
 
 
 @pytest.fixture
-def kmodleak(kmodleak_bin):
+def kmodleak(kmodleak_bin, request):
     """Factory for a traced kmodleak run: kmodleak("module", "-P") starts
     kmodleak and returns once it is tracing, or immediately with wait=False.
     Everything started is stopped, and any module it loaded unloaded, when
     the test ends."""
     started = []
+    request.node.kmodleak_runs = started
 
     def start(module, *flags, timeout=30, wait=True):
         k = Kmodleak(kmodleak_bin, module, flags, timeout=timeout)
@@ -86,5 +87,7 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     if report.when == "call" and report.failed:
+        for i, k in enumerate(getattr(item, "kmodleak_runs", [])):
+            report.sections.append((f"kmodleak output (run {i + 1})", k.output))
         dmesg = subprocess.run(["dmesg", "-T"], capture_output=True, text=True, check=False).stdout
         report.sections.append(("dmesg (tail)", "\n".join(dmesg.splitlines()[-30:])))
