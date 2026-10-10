@@ -22,7 +22,7 @@ is intended to serve as a lightweight replacement for its memory leak detector.*
 
 ### Install Dependencies
 
-You will need `clang` (at least v12 or later), `libelf` and `zlib` to build
+You will need `clang` (at least v17 or later), `libelf` and `zlib` to build
 the examples, package names may vary across distros.
 
 On Ubuntu/Debian, you need:

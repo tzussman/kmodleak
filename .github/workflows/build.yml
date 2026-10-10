@@ -13,31 +13,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        llvm: [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+        llvm: [17, 18, 19, 20, 21, 22, 23, 24]
     steps:
     - uses: actions/checkout@v7
       with:
         submodules: recursive
-    - name: Build container (20.04)
-      if: ${{ matrix.llvm < 14 }}
+    - name: Build container (24.04)
       uses: docker/build-push-action@v7
       with:
         push: false
         build-args: |
           LLVM_VERSION=${{ matrix.llvm }}
-          VERSION=20.04
-          SHORTNAME=focal
-        file: ./.github/docker/Dockerfile.ubuntu
-        tags: build_container
-    - name: Build container (22.04)
-      if: ${{ matrix.llvm >= 14 }}
-      uses: docker/build-push-action@v7
-      with:
-        push: false
-        build-args: |
-          LLVM_VERSION=${{ matrix.llvm }}
-          VERSION=22.04
-          SHORTNAME=jammy
+          VERSION=24.04
+          SHORTNAME=noble
         file: ./.github/docker/Dockerfile.ubuntu
         tags: build_container
     - name: Build kmodleak/src
