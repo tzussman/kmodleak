@@ -71,3 +71,18 @@ def test_page_allocation_leak(kmodleak, modules):
 def test_page_allocation_freed(kmodleak, modules):
     r = trace(kmodleak, modules, "noleak_pages")
     assert r.outstanding == 0
+
+
+def test_percpu_leak_with_flag(kmodleak, modules):
+    r = trace(kmodleak, modules, "leak_percpu", "-P")
+
+    stacks = r.direct_stacks("leak_percpu_init")
+    assert len(stacks) == 1
+    stack = stacks[0]
+    assert stack.count == 1
+    assert stack.size >= 4
+
+
+def test_percpu_ignored_without_flag(kmodleak, modules):
+    r = trace(kmodleak, modules, "leak_percpu")
+    assert r.direct_stacks("leak_percpu_init") == []
