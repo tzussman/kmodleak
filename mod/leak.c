@@ -1,16 +1,16 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 
-void *ptr;
+static void *ptr;
 
-int leak_init(void)
+static int __init leak_init(void)
 {
     pr_info("Loading leak module...\n");
     ptr = kmalloc(100, GFP_KERNEL);
     return 0;
 }
 
-void leak_exit(void)
+static void __exit leak_exit(void)
 {
     pr_info("Unloading leak module...\n");
     //kfree(ptr);
