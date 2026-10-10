@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause) */
 /*
  * Taken from https://github.com/iovisor/bcc/blob/master/libbpf-tools/trace_helpers.c
  * Copyright (c) 2020 Wenbo Zhang
