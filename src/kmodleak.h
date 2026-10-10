@@ -30,9 +30,12 @@ struct addr_range {
 	__u64 end;
 };
 
+/* Distinct stack traces kept for outstanding allocations */
+#define STACKS_MAX_ENTRIES 10240
+
 struct alloc_info {
 	__u64 size;
-	int stack_id;
+	__u64 stack_hash; /* key into the stacks map, 0 if the stack could not be kept */
 };
 
 enum modstate_t {

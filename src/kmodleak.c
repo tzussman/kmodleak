@@ -30,7 +30,7 @@ static struct env {
 	bool trace_all;
 	bool percpu;
 	int max_stack_depth;
-	int stack_map_max_entries;
+	int stacks_max_entries;
 	long page_size;
 	bool verbose;
 	char modname[MODULE_NAME_LEN];
@@ -38,7 +38,7 @@ static struct env {
 	.trace_all = false, // -t --trace
 	.percpu = false, // --percpu
 	.max_stack_depth = DEFAULT_MAX_STACK_DEPTH, // overridden by kernel.perf_event_max_stack
-	.stack_map_max_entries = 10240,
+	.stacks_max_entries = STACKS_MAX_ENTRIES,
 	.page_size = 1,
 	.verbose = false,
 	.modname = "",
@@ -51,7 +51,7 @@ struct allocation_node {
 };
 
 struct allocation {
-	int stack_id;
+	uint64_t stack_hash;
 	size_t size;
 	size_t count;
 	struct allocation_node *allocations;
@@ -190,7 +190,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 	}
 }
 
-int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_traces_fd) {
+int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stacks_fd) {
 	int ret = 0;
 
 	uint64_t *stack = calloc(env.max_stack_depth, sizeof(*stack));
@@ -210,7 +210,7 @@ int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_tr
 			it = it->next;
 		}
 
-		if (bpf_map_lookup_elem(stack_traces_fd, &alloc->stack_id, stack)) {
+		if (bpf_map_lookup_elem(stacks_fd, &alloc->stack_hash, stack)) {
 			if (errno == ENOENT)
 				continue;
 
@@ -242,7 +242,7 @@ int alloc_size_compare(const void *a, const void *b) {
 	return 0;
 }
 
-int print_allocs(int allocs_fd, int stack_traces_fd) {
+int print_allocs(int allocs_fd, int stacks_fd) {
 	size_t nr_allocs = 0, nr_nostack = 0, nostack_size = 0;
 	int ret = 0;
 
@@ -277,24 +277,21 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 			goto cleanup;
 		}
 
-		/*
-		 * bpf_get_stackid() fails when the stack map is full or on a
-		 * hash collision. Count these so that they are not hidden.
-		 */
-		if (alloc_info.stack_id < 0) {
+		/* The stack could not be kept, e.g. the stacks map was full */
+		if (alloc_info.stack_hash == 0) {
 			nr_nostack++;
 			nostack_size += alloc_info.size;
 			continue;
 		}
 
-		// when the stack_id exists in the allocs array,
+		// when the stack_hash exists in the allocs array,
 		//   increment size with alloc_info.size
 		bool stack_exists = false;
 
 		for (size_t i = 0; !stack_exists && i < nr_allocs; ++i) {
 			struct allocation *alloc = &allocs[i];
 
-			if (alloc->stack_id == alloc_info.stack_id) {
+			if (alloc->stack_hash == alloc_info.stack_hash) {
 				alloc->size += alloc_info.size;
 				alloc->count++;
 
@@ -318,10 +315,10 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 		if (stack_exists)
 			continue;
 
-		// When the stack_id does not exist in the allocs array,
+		// When the stack_hash does not exist in the allocs array,
 		// create a new entry in the array
 		struct allocation alloc = {
-			.stack_id = alloc_info.stack_id,
+			.stack_hash = alloc_info.stack_hash,
 			.size = alloc_info.size,
 			.count = 1,
 			.allocations = NULL,
@@ -347,7 +344,7 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 
 	printf("\n%zu stacks with outstanding allocations:\n", nr_allocs);
 
-	print_stack_frames(allocs, nr_allocs, stack_traces_fd);
+	print_stack_frames(allocs, nr_allocs, stacks_fd);
 
 	if (nr_nostack)
 		printf("%zu bytes in %zu allocations with no stack trace available\n",
@@ -560,11 +557,10 @@ int main(int argc, char **argv) {
 	}
 	memcpy(skel->rodata->modtarget, env.modname, sizeof(env.modname));
 
-	bpf_map__set_value_size(skel->maps.stack_traces,
-				env.max_stack_depth * sizeof(unsigned long));
+	bpf_map__set_value_size(skel->maps.stacks, env.max_stack_depth * sizeof(uint64_t));
+	bpf_map__set_max_entries(skel->maps.stacks, env.stacks_max_entries);
 	bpf_map__set_value_size(skel->maps.tmp_stack_traces,
 				sizeof(long) + env.max_stack_depth * sizeof(uint64_t));
-	bpf_map__set_max_entries(skel->maps.stack_traces, env.stack_map_max_entries);
 
 	// Disable kernel tracepoints based on settings or availability
 	if (!has_kernel_node_tracepoints())
@@ -581,7 +577,7 @@ int main(int argc, char **argv) {
 	}
 
 	const int allocs_fd = bpf_map__fd(skel->maps.allocs);
-	const int stack_traces_fd = bpf_map__fd(skel->maps.stack_traces);
+	const int stacks_fd = bpf_map__fd(skel->maps.stacks);
 	mod_syms_fd = bpf_map__fd(skel->maps.mod_syms);
 
 	ret = kmodleak_bpf__attach(skel);
@@ -622,7 +618,7 @@ int main(int argc, char **argv) {
 	if (!ksyms)
 		fprintf(stderr, "warning: failed to load kernel symbols\n");
 
-	if (print_allocs(allocs_fd, stack_traces_fd))
+	if (print_allocs(allocs_fd, stacks_fd))
 		ret = 1;
 
 	if (skel->bss->truncated_stacks)
