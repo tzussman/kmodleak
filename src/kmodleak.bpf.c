@@ -26,6 +26,7 @@ __u64 module_init_base = 0;
 __u64 module_init_size = 0;
 
 __u64 modload_pid_tgid = 0;
+__u64 truncated_stacks = 0; /* captures that filled the stack buffer */
 bool mod_loaded = false;
 bool mod_initialized = false;
 
@@ -197,6 +198,10 @@ static bool called_from_module(void *ctx) {
 
 	// bpf_get_stack() returns number of bytes available, divide by array type size
 	data->kern_stack_size = stack_bytes / sizeof(*data->kern_stack);
+
+	/* A full buffer may have cut off a module frame further up the stack */
+	if (data->kern_stack_size >= max_stack_depth)
+		__sync_fetch_and_add(&truncated_stacks, 1);
 
 	walk.data = data;
 	bpf_loop(data->kern_stack_size, walk_frame, &walk, 0);

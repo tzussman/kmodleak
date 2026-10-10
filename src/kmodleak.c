@@ -559,6 +559,11 @@ int main(int argc, char **argv) {
 	if (print_allocs(allocs_fd, stack_traces_fd))
 		ret = 1;
 
+	if (skel->bss->truncated_stacks)
+		printf("warning: %llu stack traces hit the limit of %d frames (kernel.perf_event_max_stack); "
+		       "allocations in them may be unattributed\n",
+		       (unsigned long long)skel->bss->truncated_stacks, env.max_stack_depth);
+
 cleanup:
 	ksyms__free(ksyms);
 	ring_buffer__free(events);

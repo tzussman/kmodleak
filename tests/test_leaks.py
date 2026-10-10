@@ -204,6 +204,17 @@ def test_stack_depth_follows_sysctl(kmodleak, modules, perf_event_max_stack, dep
     assert max(f.index for f in stacks[0].frames) < depth
 
 
+def test_truncated_stacks_are_reported(kmodleak, modules, perf_event_max_stack):
+    """With too few frames to reach the module, the leak goes unattributed
+    and the report says that stack traces were truncated."""
+    # Frame 0 is always inside the allocator or tracepoint code, never the module
+    perf_event_max_stack(1)
+    r = trace(kmodleak, modules, "leak")
+
+    assert r.direct_stacks("leak_init") == []
+    assert r.truncated_stacks > 0
+
+
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 def test_signal_before_unload_reports(kmodleak, modules, sig):
     k = kmodleak("leak")
