@@ -88,6 +88,8 @@ struct ksyms *ksyms;
 
 static struct kmodleak_bpf *skel = NULL;
 
+static int init_syms_fd = -1;
+
 static bool mod_loaded = false;
 
 error_t argp_parse_arg(int key, char *arg, struct argp_state *state) {
@@ -134,12 +136,35 @@ int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list a
 	return vfprintf(stderr, format, args);
 }
 
+/*
+ * Print a frame resolved by the BPF program, see record_init_sym(). sym is
+ * bpf_snprintf("%pS") output for addr - 1: name+0xoff/0xsize [module].
+ */
+static void print_init_sym_frame(size_t i, uint64_t addr, const struct init_sym *sym) {
+	char name[sizeof(sym->name)];
+	unsigned long off;
+
+	if (sscanf(sym->name, "%127[^+]+0x%lx", name, &off) == 2)
+		printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, name, off + 1);
+	else
+		printf("\t%3zu [<%016lx>] %s\n", i, addr, sym->name);
+}
+
 void print_stack_frames_by_ksyms(uint64_t *stack) {
+	struct init_sym init_sym;
+	const struct ksym *ksym;
+	uint64_t addr;
+
 	for (size_t i = 0; i < env.perf_max_stack_depth; ++i) {
-		const uint64_t addr = stack[i];
+		addr = stack[i];
 
 		if (addr == 0)
 			break;
+
+		if (init_syms_fd >= 0 && bpf_map_lookup_elem(init_syms_fd, &addr, &init_sym) == 0) {
+			print_init_sym_frame(i, addr, &init_sym);
+			continue;
+		}
 
 		/*
 		 * Frame 0 is the instruction pointer when the stack was captured.
@@ -148,7 +173,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 		 * instruction, so look up the preceding byte to attribute it to
 		 * the caller.
 		 */
-		const struct ksym *ksym = ksyms__map_addr(ksyms, i == 0 ? addr : addr - 1);
+		ksym = ksyms__map_addr(ksyms, i == 0 ? addr : addr - 1);
 
 		/*
 		 * Print the stack frames. Give the frame index a field width of 3,
@@ -481,6 +506,7 @@ int main(int argc, char **argv) {
 
 	const int allocs_fd = bpf_map__fd(skel->maps.allocs);
 	const int stack_traces_fd = bpf_map__fd(skel->maps.stack_traces);
+	init_syms_fd = bpf_map__fd(skel->maps.init_syms);
 
 	ret = kmodleak_bpf__attach(skel);
 	if (ret) {
