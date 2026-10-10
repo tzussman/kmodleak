@@ -37,6 +37,11 @@ class Frame:
     offset: int  # offset from symbol, 0 when unresolved
 
 
+# Frames that belong to the allocator or tracepoint machinery rather than to
+# a caller: anything between an allocation and the function that made it.
+_ALLOCATOR = re.compile(r"alloc|free_pages|^(__traceiter_|trace_|perf_trace_)")
+
+
 @dataclass
 class Stack:
     size: int  # total bytes outstanding from this stack
@@ -46,6 +51,17 @@ class Stack:
 
     def symbols(self):
         return [f.symbol for f in self.frames]
+
+    def is_direct_from(self, symbol):
+        """Whether the allocation was made directly by the named function:
+        it is on the stack and every frame above it is allocator internal.
+        Allocations the kernel makes on a module's behalf, such as sysfs
+        nodes created by kmem_cache_create(), have other frames in between.
+        """
+        syms = self.symbols()
+        if symbol not in syms:
+            return False
+        return all(_ALLOCATOR.search(s) for s in syms[:syms.index(symbol)])
 
 
 @dataclass
@@ -62,6 +78,10 @@ class Report:
     @property
     def outstanding(self):
         return sum(s.count for s in self.stacks) + self.no_stack_count
+
+    def direct_stacks(self, symbol):
+        """Stacks of allocations made directly by the named function."""
+        return [s for s in self.stacks if s.is_direct_from(symbol)]
 
 
 _RE = {
