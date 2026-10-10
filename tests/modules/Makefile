@@ -7,6 +7,7 @@ obj-m += leak_work.o
 obj-m += noleak_xctx.o
 obj-m += cache_alloc.o
 obj-m += leak_initfail.o
+obj-m += leak_with_the_longest_module_name_the_kernel_permits_xx.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 

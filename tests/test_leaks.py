@@ -182,3 +182,14 @@ def test_leak_from_failing_init(kmodleak, modules):
     stacks = r.direct_stacks("leak_initfail_init")
     assert len(stacks) == 1
     assert stacks[0].count == 1
+
+
+LONG_NAME = "leak_with_the_longest_module_name_the_kernel_permits_xx"
+
+
+def test_longest_module_name(kmodleak, modules):
+    """A MODULE_NAME_LEN - 1 character name is matched in full."""
+    assert len(LONG_NAME) == 55
+    r = trace(kmodleak, modules, LONG_NAME)
+
+    assert len(r.direct_stacks("longname_init")) == 1
