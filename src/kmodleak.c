@@ -413,7 +413,7 @@ int main(int argc, char **argv) {
 	sa.sa_handler = sig_handler;
 
 	// Install signal handler
-	if (sigaction(SIGINT, &sa, NULL)) {
+	if (sigaction(SIGINT, &sa, NULL) || sigaction(SIGTERM, &sa, NULL)) {
 		perror("failed to set up signal handling");
 		ret = -errno;
 
