@@ -206,7 +206,7 @@ int alloc_size_compare(const void *a, const void *b) {
 }
 
 int print_allocs(int allocs_fd, int stack_traces_fd) {
-	size_t nr_allocs = 0;
+	size_t nr_allocs = 0, nr_nostack = 0, nostack_size = 0;
 	int ret = 0;
 
 	struct allocation *allocs = calloc(ALLOCS_MAX_ENTRIES, sizeof(*allocs));
@@ -240,9 +240,15 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 			goto cleanup;
 		}
 
-		// filter invalid stacks
-		if (alloc_info.stack_id < 0)
+		/*
+		 * bpf_get_stackid() fails when the stack map is full or on a
+		 * hash collision. Count these so that they are not hidden.
+		 */
+		if (alloc_info.stack_id < 0) {
+			nr_nostack++;
+			nostack_size += alloc_info.size;
 			continue;
+		}
 
 		// when the stack_id exists in the allocs array,
 		//   increment size with alloc_info.size
@@ -305,6 +311,10 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 	printf("\n%zu stacks with outstanding allocations:\n", nr_allocs);
 
 	print_stack_frames(allocs, nr_allocs, stack_traces_fd);
+
+	if (nr_nostack)
+		printf("%zu bytes in %zu allocations with no stack trace available\n",
+		       nostack_size, nr_nostack);
 
 	// Free allocs list
 	for (size_t i = 0; i < nr_allocs; i++) {
