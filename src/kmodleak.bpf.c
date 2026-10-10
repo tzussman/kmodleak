@@ -18,6 +18,9 @@
 const volatile size_t page_size = 4096;
 const volatile char modtarget[MODULE_NAME_LEN] = "";
 const volatile bool trace_all = false;
+const volatile __u32 max_stack_depth = DEFAULT_MAX_STACK_DEPTH;
+const volatile struct addr_range slab_ranges[SLAB_RANGES_MAX];
+const volatile __u32 nr_slab_ranges = 0;
 
 __u64 module_base = 0;
 __u64 module_size = 0;
@@ -25,6 +28,7 @@ __u64 module_init_base = 0;
 __u64 module_init_size = 0;
 
 __u64 modload_pid_tgid = 0;
+__u64 truncated_stacks = 0; /* captures that filled the stack buffer */
 bool mod_loaded = false;
 bool mod_initialized = false;
 
@@ -52,26 +56,26 @@ struct {
 } events SEC(".maps");
 
 /*
- * Symbols for return addresses in the module's init text, resolved in the
- * kernel while the init text is still mapped. Keyed by return address; the
- * value is bpf_snprintf("%pS") output for the preceding byte.
+ * Symbols for return addresses in the module's text, resolved in the kernel
+ * while the module is loaded. Keyed by return address; the value is
+ * bpf_snprintf("%pS") output for the preceding byte.
  */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__type(key, u64); /* return address */
-	__type(value, struct init_sym);
-	__uint(max_entries, INIT_SYMS_MAX_ENTRIES);
-} init_syms SEC(".maps");
+	__type(value, struct mod_sym);
+	__uint(max_entries, MOD_SYMS_MAX_ENTRIES);
+} mod_syms SEC(".maps");
 
 struct stack_trace_t {
 	long kern_stack_size;
-	u64 kern_stack[PERF_MAX_STACK_DEPTH + 1];
+	u64 kern_stack[]; /* max_stack_depth entries, sized by userspace */
 };
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(key_size, sizeof(u32));
-	__uint(value_size, sizeof(struct stack_trace_t));
+	__uint(value_size, sizeof(struct stack_trace_t) + DEFAULT_MAX_STACK_DEPTH * sizeof(u64));
 	__uint(max_entries, 1);
 } tmp_stack_traces SEC(".maps");
 
@@ -84,12 +88,29 @@ static __always_inline bool in_module_init(u64 ip) {
 	return !mod_initialized && module_init_base <= ip && ip < module_init_base + module_init_size;
 }
 
-static void record_init_sym(u64 ip) {
+/* ip is in the module's text, core or init */
+static __always_inline bool in_module(u64 ip) {
+	return (module_base <= ip && ip < module_base + module_size) || in_module_init(ip);
+}
+
+/* ip is in a slab allocator function that allocates pages, see slab_ranges */
+static __always_inline bool in_slab_allocator(u64 ip) {
+	for (u32 i = 0; i < SLAB_RANGES_MAX; i++) {
+		if (i >= nr_slab_ranges)
+			break;
+		if (slab_ranges[i].start <= ip && ip < slab_ranges[i].end)
+			return true;
+	}
+
+	return false;
+}
+
+static void record_mod_sym(u64 ip) {
 	static const char fmt[] = "%pS";
-	struct init_sym sym;
+	struct mod_sym sym;
 	u64 args[1];
 
-	if (bpf_map_lookup_elem(&init_syms, &ip))
+	if (bpf_map_lookup_elem(&mod_syms, &ip))
 		return;
 
 	/*
@@ -102,37 +123,41 @@ static void record_init_sym(u64 ip) {
 	if (bpf_snprintf(sym.name, sizeof(sym.name), fmt, args, sizeof(args)) < 0)
 		return;
 
-	bpf_map_update_elem(&init_syms, &ip, &sym, BPF_NOEXIST);
+	bpf_map_update_elem(&mod_syms, &ip, &sym, BPF_NOEXIST);
 }
 
 /*
- * Resolve the init text frames of the stack captured by called_from_module().
- * __init symbols disappear from kallsyms once the module's init function
- * returns, so userspace cannot resolve them after the fact.
+ * One frame of the stack captured by called_from_module(), run from
+ * bpf_loop() so that the verifier checks it once rather than per frame.
+ * Module frames are resolved while the module is loaded: the module's
+ * symbols disappear from kallsyms when it is unloaded, and its __init
+ * symbols as soon as its init function returns, so userspace cannot
+ * reliably resolve them after the fact.
  */
-static void record_init_syms(void) {
-	volatile long stack_size; // verifier hack
+struct walk_ctx {
 	struct stack_trace_t *data;
-	u32 key = 0;
+	bool check_slab; /* note frames in the slab allocator, for page allocations */
+	bool found;
+	bool via_slab;
+};
 
-	if (mod_initialized)
-		return;
+static long walk_frame(u64 i, void *ctx) {
+	struct walk_ctx *walk = ctx;
+	u64 ip;
 
-	data = bpf_map_lookup_elem(&tmp_stack_traces, &key);
-	if (!data)
-		return;
+	/* max_stack_depth is read-only data, so the verifier knows the bound */
+	if (i >= max_stack_depth || i >= MAX_STACK_DEPTH_LIMIT)
+		return 1;
 
-	stack_size = data->kern_stack_size;
-
-	if (stack_size > PERF_MAX_STACK_DEPTH)
-		return;
-
-	for (u32 i = 0; i < (stack_size & PERF_MAX_STACK_DEPTH); i++) {
-		u64 ip = data->kern_stack[i & PERF_MAX_STACK_DEPTH];
-
-		if (in_module_init(ip))
-			record_init_sym(ip);
+	ip = walk->data->kern_stack[i];
+	if (in_module(ip)) {
+		walk->found = true;
+		record_mod_sym(ip);
+	} else if (walk->check_slab && in_slab_allocator(ip)) {
+		walk->via_slab = true;
 	}
+
+	return 0;
 }
 
 static int record_alloc(void *ctx, u64 address, size_t size) {
@@ -144,7 +169,6 @@ static int record_alloc(void *ctx, u64 address, size_t size) {
 	if (address != 0) {
 		info.stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
 		bpf_map_update_elem(&allocs, &address, &info, BPF_ANY);
-		record_init_syms();
 	}
 
 	if (trace_all)
@@ -168,36 +192,14 @@ static int record_free(const void *address) {
 	return 0;
 }
 
-static bool iterate_stack_trace(struct stack_trace_t *data) {
-	volatile long stack_size; // verifier hack
-
-	if (!data)
-		return false;
-
-	stack_size = data->kern_stack_size;
-
-	if (stack_size > PERF_MAX_STACK_DEPTH)
-		return false;
-
-	for (u32 i = 0; i < (stack_size & PERF_MAX_STACK_DEPTH); i++) {
-		u64 ip = data->kern_stack[i & PERF_MAX_STACK_DEPTH];
-
-		// ip is located in the module's VM area
-		if (module_base <= ip && ip < module_base + module_size)
-			return true;
-
-		// ip is located in the module's init area (before initialization completed)
-		if (in_module_init(ip))
-			return true;
-	}
-
-	return false;
-}
-
 /*
  * Checks if the callsite passed through the specified module's text sections.
+ * Page allocations the slab allocator makes while serving the module are not
+ * counted: the object is accounted through the kmem tracepoints, and the page
+ * stays with the slab cache after the object is freed.
  */
-static bool called_from_module(void *ctx) {
+static bool called_from_module(void *ctx, bool page_alloc) {
+	struct walk_ctx walk = { .check_slab = page_alloc };
 	struct stack_trace_t *data;
 	long stack_bytes;
 	u32 key = 0;
@@ -209,8 +211,7 @@ static bool called_from_module(void *ctx) {
 	if (!data)
 		return false;
 
-	stack_bytes = bpf_get_stack(ctx, data->kern_stack,
-				    PERF_MAX_STACK_DEPTH * sizeof(*data->kern_stack), 0);
+	stack_bytes = bpf_get_stack(ctx, data->kern_stack, max_stack_depth * sizeof(*data->kern_stack), 0);
 	if (stack_bytes < 0) {
 		bpf_printk("bpf_get_stack() failed: %ld\n", stack_bytes);
 		return false;
@@ -219,10 +220,14 @@ static bool called_from_module(void *ctx) {
 	// bpf_get_stack() returns number of bytes available, divide by array type size
 	data->kern_stack_size = stack_bytes / sizeof(*data->kern_stack);
 
-	if (!iterate_stack_trace(data))
-		return false;
+	/* A full buffer may have cut off a module frame further up the stack */
+	if (data->kern_stack_size >= max_stack_depth)
+		__sync_fetch_and_add(&truncated_stacks, 1);
 
-	return true;
+	walk.data = data;
+	bpf_loop(data->kern_stack_size, walk_frame, &walk, 0);
+
+	return walk.found && !walk.via_slab;
 }
 
 /*
@@ -319,7 +324,7 @@ int kmodleak__kmalloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, false))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -343,7 +348,7 @@ int kmodleak__kmalloc_node(void *ctx) {
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (!called_from_module(ctx))
+		if (!called_from_module(ctx, false))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -379,7 +384,7 @@ int kmodleak__kmem_cache_alloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, false))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -403,7 +408,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx) {
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (!called_from_module(ctx))
+		if (!called_from_module(ctx, false))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -436,7 +441,7 @@ int kmodleak__kmem_cache_free(void *ctx) {
 
 SEC("tracepoint/kmem/mm_page_alloc")
 int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx) {
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, true))
 		return 0;
 
 	return record_alloc(ctx, ctx->pfn, page_size << ctx->order);
@@ -452,7 +457,7 @@ int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx) {
 
 SEC("tracepoint/percpu/percpu_alloc_percpu")
 int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ctx) {
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, false))
 		return 0;
 
 	return record_alloc(ctx, (u64)(ctx->ptr), ctx->bytes_alloc);

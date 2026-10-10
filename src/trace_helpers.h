@@ -189,4 +189,16 @@ static inline bool is_kernel_module(const char *name) {
 	return access(path, F_OK) == 0;
 }
 
+static inline int read_perf_event_max_stack(void) {
+	FILE *f = fopen("/proc/sys/kernel/perf_event_max_stack", "r");
+	int value;
+
+	if (!f)
+		return -1;
+	if (fscanf(f, "%d", &value) != 1)
+		value = -1;
+	fclose(f);
+	return value;
+}
+
 #endif /* __TRACE_HELPERS_H */

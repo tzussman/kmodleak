@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Leak detection on the sample modules."""
 
+import errno
 import os
 import signal
 import subprocess
@@ -57,6 +58,28 @@ def test_multiple_allocations_aggregate(kmodleak, modules):
     assert stack.size >= 10 * 64
 
 
+def test_slab_pages_are_not_attributed(kmodleak, modules):
+    """Pages the slab allocator takes to serve the module's kmallocs are the
+    slab's, not the module's: enough objects to need new slabs must still
+    report only the object stack."""
+    r = trace(kmodleak, modules, "leak_multi", params=("nr_allocs=20000",))
+
+    stacks = [s for s in r.stacks if "leak_multi_init" in s.symbols()]
+    assert len(stacks) == 1
+    assert stacks[0].count == 20000
+
+
+def test_large_kmalloc_counted_once(kmodleak, modules):
+    """A kmalloc too large for a slab cache is served by the page allocator
+    and traced as an object; its pages must not be reported as well."""
+    r = trace(kmodleak, modules, "leak_large")
+
+    stacks = [s for s in r.stacks if "leak_large_init" in s.symbols()]
+    assert len(stacks) == 1
+    assert stacks[0].count == 1
+    assert stacks[0].size >= 256 * 1024
+
+
 def test_page_allocation_leak(kmodleak, modules):
     """Page allocations are tracked by pfn and sized by order."""
     r = trace(kmodleak, modules, "leak_pages")
@@ -101,19 +124,9 @@ def check_core_text_leak(r):
 
 
 def test_leak_from_core_text(kmodleak, modules):
-    """An allocation after init, from a parameter callback in core text,
-    is attributed to the module and resolved from kallsyms."""
-    def between():
-        # Give kmodleak time to snapshot kallsyms before the module is gone
-        time.sleep(0.5)
-        write_trigger()
-
-    r = trace(kmodleak, modules, "leak_core", between=between)
-    check_core_text_leak(r)
-
-
-@pytest.mark.xfail(reason="core text symbols come from a kallsyms snapshot that races a fast unload")
-def test_leak_from_core_text_fast_unload(kmodleak, modules):
+    """An allocation after init, from a parameter callback in core text, is
+    attributed to the module and its symbol resolved even though the module
+    is unloaded again immediately."""
     r = trace(kmodleak, modules, "leak_core", between=write_trigger)
     check_core_text_leak(r)
 
@@ -167,6 +180,61 @@ def test_other_modules_are_ignored(kmodleak, modules):
     assert r.returncode == 0 and r.done
     assert r.loaded and r.unloaded
     assert r.outstanding == 0
+
+
+PERF_EVENT_MAX_STACK = Path("/proc/sys/kernel/perf_event_max_stack")
+
+
+def write_perf_event_max_stack(value, retries=40):
+    """The kernel refuses the change while anything holds a callchain buffer,
+    which includes a stack map that is still being freed after kmodleak
+    exited, so retry for a few seconds."""
+    for attempt in range(retries):
+        try:
+            PERF_EVENT_MAX_STACK.write_text(str(value))
+            return
+        except OSError as e:
+            if e.errno != errno.EBUSY or attempt == retries - 1:
+                raise
+            time.sleep(0.1)
+
+
+@pytest.fixture
+def perf_event_max_stack():
+    """Set kernel.perf_event_max_stack for a test and restore it afterwards."""
+    saved = PERF_EVENT_MAX_STACK.read_text()
+
+    def set_depth(depth):
+        try:
+            write_perf_event_max_stack(depth)
+        except OSError as e:
+            pytest.skip(f"cannot set kernel.perf_event_max_stack: {e}")
+
+    yield set_depth
+    write_perf_event_max_stack(saved)
+
+
+@pytest.mark.parametrize("depth", [16, 4095])
+def test_stack_depth_follows_sysctl(kmodleak, modules, perf_event_max_stack, depth):
+    """The stack depth is sized from kernel.perf_event_max_stack, up to the
+    most the per-CPU stack buffer can hold."""
+    perf_event_max_stack(depth)
+    r = trace(kmodleak, modules, "leak")
+
+    stacks = r.direct_stacks("leak_init")
+    assert len(stacks) == 1
+    assert max(f.index for f in stacks[0].frames) < depth
+
+
+def test_truncated_stacks_are_reported(kmodleak, modules, perf_event_max_stack):
+    """With too few frames to reach the module, the leak goes unattributed
+    and the report says that stack traces were truncated."""
+    # Frame 0 is always inside the allocator or tracepoint code, never the module
+    perf_event_max_stack(1)
+    r = trace(kmodleak, modules, "leak")
+
+    assert r.direct_stacks("leak_init") == []
+    assert r.truncated_stacks > 0
 
 
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])

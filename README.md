@@ -23,7 +23,7 @@ is intended to serve as a lightweight replacement for its memory leak detector.*
 ### Requirements
 
 `kmodleak` must be run as root on a kernel built with `CONFIG_DEBUG_INFO_BTF`,
-`CONFIG_KPROBES` and `CONFIG_BPF_EVENTS`. Linux 5.13 or later is required for
+`CONFIG_KPROBES` and `CONFIG_BPF_EVENTS`. Linux 5.17 or later is required for
 the BPF helpers used.
 
 ### Install Dependencies

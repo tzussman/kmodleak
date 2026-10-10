@@ -73,6 +73,7 @@ class Report:
     stacks: list = field(default_factory=list)
     no_stack_bytes: int = 0
     no_stack_count: int = 0
+    truncated_stacks: int = 0  # captures that hit the stack depth limit
     done: bool = False
 
     @property
@@ -90,6 +91,7 @@ _RE = {
     "alloc": re.compile(r"^\s+addr = (0x[0-9a-f]+) size = (\d+)$"),
     "frame": re.compile(r"^\s+(\d+) \[<([0-9a-f]+)>\] (.+)$"),
     "nostack": re.compile(r"^(\d+) bytes in (\d+) allocations with no stack trace available$"),
+    "truncated": re.compile(r"^warning: (\d+) stack traces hit the limit of (\d+) frames"),
     "symbol": re.compile(r"^(.+)\+0x([0-9a-f]+)$"),
 }
 
@@ -132,6 +134,11 @@ def parse_report(output, returncode=0):
         if m:
             report.no_stack_bytes = int(m.group(1))
             report.no_stack_count = int(m.group(2))
+            continue
+
+        m = _RE["truncated"].match(line)
+        if m:
+            report.truncated_stacks = int(m.group(1))
             continue
 
         if line == "done":

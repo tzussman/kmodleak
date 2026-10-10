@@ -29,7 +29,7 @@
 static struct env {
 	bool trace_all;
 	bool percpu;
-	int perf_max_stack_depth;
+	int max_stack_depth;
 	int stack_map_max_entries;
 	long page_size;
 	bool verbose;
@@ -37,7 +37,7 @@ static struct env {
 } env = {
 	.trace_all = false, // -t --trace
 	.percpu = false, // --percpu
-	.perf_max_stack_depth = PERF_MAX_STACK_DEPTH,
+	.max_stack_depth = DEFAULT_MAX_STACK_DEPTH, // overridden by kernel.perf_event_max_stack
 	.stack_map_max_entries = 10240,
 	.page_size = 1,
 	.verbose = false,
@@ -88,7 +88,7 @@ struct ksyms *ksyms;
 
 static struct kmodleak_bpf *skel = NULL;
 
-static int init_syms_fd = -1;
+static int mod_syms_fd = -1;
 
 static bool mod_loaded = false;
 
@@ -139,10 +139,10 @@ int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list a
 }
 
 /*
- * Print a frame resolved by the BPF program, see record_init_sym(). sym is
+ * Print a frame resolved by the BPF program, see record_mod_sym(). sym is
  * bpf_snprintf("%pS") output for addr - 1: name+0xoff/0xsize [module].
  */
-static void print_init_sym_frame(size_t i, uint64_t addr, const struct init_sym *sym) {
+static void print_mod_sym_frame(size_t i, uint64_t addr, const struct mod_sym *sym) {
 	char name[sizeof(sym->name)];
 	unsigned long off;
 
@@ -153,18 +153,19 @@ static void print_init_sym_frame(size_t i, uint64_t addr, const struct init_sym 
 }
 
 void print_stack_frames_by_ksyms(uint64_t *stack) {
-	struct init_sym init_sym;
+	struct mod_sym mod_sym;
 	const struct ksym *ksym;
 	uint64_t addr;
 
-	for (size_t i = 0; i < env.perf_max_stack_depth; ++i) {
+	for (size_t i = 0; i < env.max_stack_depth; ++i) {
 		addr = stack[i];
 
 		if (addr == 0)
 			break;
 
-		if (init_syms_fd >= 0 && bpf_map_lookup_elem(init_syms_fd, &addr, &init_sym) == 0) {
-			print_init_sym_frame(i, addr, &init_sym);
+		/* Module frames were resolved by the BPF program while it was loaded */
+		if (bpf_map_lookup_elem(mod_syms_fd, &addr, &mod_sym) == 0) {
+			print_mod_sym_frame(i, addr, &mod_sym);
 			continue;
 		}
 
@@ -175,7 +176,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 		 * instruction, so look up the preceding byte to attribute it to
 		 * the caller.
 		 */
-		ksym = ksyms__map_addr(ksyms, i == 0 ? addr : addr - 1);
+		ksym = ksyms ? ksyms__map_addr(ksyms, i == 0 ? addr : addr - 1) : NULL;
 
 		/*
 		 * Print the stack frames. Give the frame index a field width of 3,
@@ -192,7 +193,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_traces_fd) {
 	int ret = 0;
 
-	uint64_t *stack = calloc(env.perf_max_stack_depth, sizeof(*stack));
+	uint64_t *stack = calloc(env.max_stack_depth, sizeof(*stack));
 	if (!stack) {
 		perror("failed to allocate stack array");
 		return -ENOMEM;
@@ -392,6 +393,65 @@ void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
 	skel->links.kmodleak__kretprobe__load_module = NULL;
 }
 
+/*
+ * Page allocations made by the slab allocator while serving the module's
+ * kmalloc() are not the module's own, and neither are the pages behind a
+ * large kmalloc(), which is traced as an object. Page allocations whose stack
+ * passes through a function with one of these prefixes are left out. The
+ * exact names differ between kernel versions and slab allocators, so match
+ * prefixes against kallsyms and use whatever exists.
+ */
+static const char *slab_page_func_prefixes[] = {
+	"__kmalloc", "___kmalloc", "kmalloc_large", "kmalloc_order", /* kmalloc and its page-backed sizes */
+	"new_slab", "allocate_slab", "___slab_alloc", "__slab_alloc", /* SLUB slab growth */
+	"kmem_getpages", "cache_grow", /* SLAB, before 6.8 */
+};
+
+static bool is_slab_page_func(const char *name) {
+	for (size_t i = 0; i < sizeof(slab_page_func_prefixes) / sizeof(*slab_page_func_prefixes); i++) {
+		if (strncmp(name, slab_page_func_prefixes[i], strlen(slab_page_func_prefixes[i])) == 0)
+			return true;
+	}
+
+	return false;
+}
+
+static int fill_slab_ranges(struct kmodleak_bpf *skel) {
+	struct ksyms *ks = ksyms__load();
+	size_t n = 0;
+
+	if (!ks)
+		return -1;
+
+	/* syms are sorted by address, so a function ends where the next symbol starts */
+	for (int i = 0; i < ks->syms_sz - 1; i++) {
+		const struct ksym *sym = &ks->syms[i], *next = sym + 1;
+
+		if (!is_slab_page_func(sym->name))
+			continue;
+
+		while (next < ks->syms + ks->syms_sz - 1 && next->addr == sym->addr)
+			next++;
+
+		if (n == SLAB_RANGES_MAX) {
+			fprintf(stderr, "warning: too many slab allocator symbols, ignoring %s\n", sym->name);
+			continue;
+		}
+
+		skel->rodata->slab_ranges[n].start = sym->addr;
+		skel->rodata->slab_ranges[n].end = next->addr;
+		n++;
+	}
+
+	skel->rodata->nr_slab_ranges = n;
+	ksyms__free(ks);
+
+	if (n == 0)
+		fprintf(stderr, "warning: no slab allocator symbols found; slab pages will be attributed to the module\n");
+
+	return 0;
+}
+
 int handle_event(void *ctx, void *data, size_t data_sz) {
 	const struct mod_event *ev = data;
 
@@ -399,16 +459,6 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 		mod_loaded = true;
 
 		detach_kernel_module_load_tracepoint(skel);
-
-		/*
-		 * Module symbols are only added to kallsyms after the module is
-		 * loaded.
-		 */
-		ksyms = ksyms__load();
-		if (!ksyms) {
-			fprintf(stderr, "Failed to load ksyms\n");
-			return -1;
-		}
 
 		printf("module '%s' loaded\n", env.modname);
 	} else if (ev->state == MOD_INITIALIZED) {
@@ -430,6 +480,7 @@ int main(int argc, char **argv) {
 	int ret = 0;
 	struct ring_buffer *events = NULL;
 	struct sigaction sa;
+	int max_stack;
 
 	static const struct argp argp = {
 		.options = argp_options,
@@ -464,6 +515,19 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	/*
+	 * The kernel caps stack traces at kernel.perf_event_max_stack and refuses
+	 * a stack map deeper than that, so size everything from it.
+	 */
+	max_stack = read_perf_event_max_stack();
+	if (max_stack < 1)
+		fprintf(stderr, "warning: cannot read kernel.perf_event_max_stack, assuming %d\n",
+			env.max_stack_depth);
+	else if (max_stack > MAX_STACK_DEPTH_LIMIT)
+		env.max_stack_depth = MAX_STACK_DEPTH_LIMIT;
+	else
+		env.max_stack_depth = max_stack;
+
 	// Check if module is already loaded
 	if (is_kernel_module(env.modname)) {
 		fprintf(stderr, "module '%s' is already loaded. Please unload and try again.\n",
@@ -486,10 +550,20 @@ int main(int argc, char **argv) {
 
 	skel->rodata->trace_all = env.trace_all;
 	skel->rodata->page_size = env.page_size;
+	skel->rodata->max_stack_depth = env.max_stack_depth;
+
+	if (fill_slab_ranges(skel)) {
+		fprintf(stderr, "failed to load kernel symbols\n");
+		ret = 1;
+
+		goto cleanup;
+	}
 	memcpy(skel->rodata->modtarget, env.modname, sizeof(env.modname));
 
 	bpf_map__set_value_size(skel->maps.stack_traces,
-				env.perf_max_stack_depth * sizeof(unsigned long));
+				env.max_stack_depth * sizeof(unsigned long));
+	bpf_map__set_value_size(skel->maps.tmp_stack_traces,
+				sizeof(long) + env.max_stack_depth * sizeof(uint64_t));
 	bpf_map__set_max_entries(skel->maps.stack_traces, env.stack_map_max_entries);
 
 	// Disable kernel tracepoints based on settings or availability
@@ -508,7 +582,7 @@ int main(int argc, char **argv) {
 
 	const int allocs_fd = bpf_map__fd(skel->maps.allocs);
 	const int stack_traces_fd = bpf_map__fd(skel->maps.stack_traces);
-	init_syms_fd = bpf_map__fd(skel->maps.init_syms);
+	mod_syms_fd = bpf_map__fd(skel->maps.mod_syms);
 
 	ret = kmodleak_bpf__attach(skel);
 	if (ret) {
@@ -543,8 +617,18 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	/* Kernel symbols for the report; the module's own are in mod_syms */
+	ksyms = ksyms__load();
+	if (!ksyms)
+		fprintf(stderr, "warning: failed to load kernel symbols\n");
+
 	if (print_allocs(allocs_fd, stack_traces_fd))
 		ret = 1;
+
+	if (skel->bss->truncated_stacks)
+		printf("warning: %llu stack traces hit the limit of %d frames (kernel.perf_event_max_stack); "
+		       "allocations in them may be unattributed\n",
+		       (unsigned long long)skel->bss->truncated_stacks, env.max_stack_depth);
 
 cleanup:
 	ksyms__free(ksyms);
