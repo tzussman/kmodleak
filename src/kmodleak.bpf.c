@@ -22,6 +22,7 @@ struct {
 	__type(key, u64); /* address */
 	__type(value, struct alloc_info);
 	__uint(max_entries, ALLOCS_MAX_ENTRIES);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
 } allocs SEC(".maps");
 
 struct {
