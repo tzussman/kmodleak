@@ -45,8 +45,7 @@ struct alloc_info {
 
 enum modstate_t {
 	MOD_LOADED = 1,
-	MOD_INITIALIZED = 2,
-	MOD_FREED = 3,
+	MOD_FREED = 2,
 };
 
 struct mod_event {

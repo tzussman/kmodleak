@@ -29,7 +29,7 @@ __u64 module_size = 0;
 __u64 module_init_base = 0;
 __u64 module_init_size = 0;
 
-__u64 modload_pid_tgid = 0;
+__u64 traced_module = 0; /* struct module * of the traced module */
 __u64 truncated_stacks = 0; /* captures that filled the stack buffer */
 bool mod_loaded = false;
 bool mod_initialized = false;
@@ -92,9 +92,31 @@ static __always_inline bool module_loaded(void) {
 	return mod_loaded;
 }
 
-/* ip is in the module's init text, which is only mapped until init completes */
+/*
+ * ip is in the module's init text, which only runs while the module's state
+ * is MODULE_STATE_COMING. The kernel sets that before module_load fires and
+ * frees the init memory only after changing it and an RCU grace period, so
+ * the state is read for init frames only until it has been seen to change.
+ */
 static __always_inline bool in_module_init(u64 ip) {
-	return !mod_initialized && module_init_base <= ip && ip < module_init_base + module_init_size;
+	struct module *mod = (struct module *)traced_module;
+	enum module_state state;
+
+	if (!(module_init_base <= ip && ip < module_init_base + module_init_size))
+		return false;
+
+	if (mod_initialized)
+		return false;
+
+	/* If the state cannot be read, keep treating the text as init text */
+	if (bpf_core_read(&state, sizeof(state), &mod->state))
+		return true;
+
+	if (state == bpf_core_enum_value(enum module_state, MODULE_STATE_COMING))
+		return true;
+
+	mod_initialized = true;
+	return false;
 }
 
 /* ip is in the module's text, core or init */
@@ -293,7 +315,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 	fill_module_text_layout(mod, &module_base, &module_size, &module_init_base,
 				&module_init_size);
 
-	modload_pid_tgid = bpf_get_current_pid_tgid();
+	traced_module = (u64)mod;
 	mod_loaded = true;
 
 	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
@@ -301,26 +323,6 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 		return 0;
 
 	ev->state = MOD_LOADED;
-
-	bpf_ringbuf_submit(ev, 0);
-
-	return 0;
-}
-
-SEC("kretprobe/load_module")
-int BPF_KRETPROBE(kmodleak__kretprobe__load_module) {
-	struct mod_event *ev;
-
-	if (mod_initialized || modload_pid_tgid != bpf_get_current_pid_tgid())
-		return 0;
-
-	mod_initialized = true;
-
-	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
-	if (!ev)
-		return 0;
-
-	ev->state = MOD_INITIALIZED;
 
 	bpf_ringbuf_submit(ev, 0);
 

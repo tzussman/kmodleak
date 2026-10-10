@@ -385,11 +385,6 @@ void detach_kernel_module_load_tracepoint(struct kmodleak_bpf *skel) {
 	skel->links.kmodleak__module_load = NULL;
 }
 
-void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
-	bpf_link__destroy(skel->links.kmodleak__kretprobe__load_module);
-	skel->links.kmodleak__kretprobe__load_module = NULL;
-}
-
 /*
  * Allocations an allocator makes for itself while serving the module are not
  * the module's own: pages taken by the slab allocator, including for a large
@@ -487,8 +482,6 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 		detach_kernel_module_load_tracepoint(skel);
 
 		printf("module '%s' loaded\n", env.modname);
-	} else if (ev->state == MOD_INITIALIZED) {
-		detach_kernel_module_init_kretprobe(skel);
 	} else if (ev->state == MOD_FREED) {
 		if (!mod_loaded) {
 			fprintf(stderr, "error: module '%s' freed before loaded\n", env.modname);

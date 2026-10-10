@@ -280,8 +280,8 @@ def test_signal_before_unload_reports(kmodleak, modules, sig):
 
 
 def test_leak_from_failing_init(kmodleak, modules):
-    """A module whose init fails is freed without an exit function; the
-    leak is still reported and its init symbol resolved."""
+    """A module whose init fails is freed from do_init_module() without an
+    exit function; the leak is still reported and its init symbol resolved."""
     k = kmodleak("leak_initfail")
     with pytest.raises(subprocess.CalledProcessError):
         k.insmod(modules.ko("leak_initfail"))
