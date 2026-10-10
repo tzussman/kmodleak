@@ -56,7 +56,7 @@ static __always_inline bool module_loaded(void) {
 	return module_base != 0 && module_size != 0;
 }
 
-static int gen_alloc_exit2(void *ctx, u64 address, size_t size) {
+static int record_alloc(void *ctx, u64 address, size_t size) {
 	struct alloc_info info;
 
 	__builtin_memset(&info, 0, sizeof(info));
@@ -73,7 +73,7 @@ static int gen_alloc_exit2(void *ctx, u64 address, size_t size) {
 	return 0;
 }
 
-static int gen_free_enter(const void *address) {
+static int record_free(const void *address) {
 	const u64 addr = (u64)address;
 
 	const struct alloc_info *info = bpf_map_lookup_elem(&allocs, &addr);
@@ -247,7 +247,7 @@ int kmodleak__kmalloc(void *ctx) {
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 	}
 
-	return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
+	return record_alloc(ctx, (u64)ptr, bytes_alloc);
 }
 
 SEC("tracepoint/kmem/kmalloc_node")
@@ -264,7 +264,7 @@ int kmodleak__kmalloc_node(void *ctx) {
 		ptr = BPF_CORE_READ(args, ptr);
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 
-		return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
+		return record_alloc(ctx, (u64)ptr, bytes_alloc);
 	} else {
 		/* tracepoint is disabled if doesn't exist, avoid compile warning */
 		return 0;
@@ -286,7 +286,7 @@ int kmodleak__kfree(void *ctx) {
 		ptr = BPF_CORE_READ(args, ptr);
 	}
 
-	return gen_free_enter(ptr);
+	return record_free(ptr);
 }
 
 SEC("tracepoint/kmem/kmem_cache_alloc")
@@ -307,7 +307,7 @@ int kmodleak__kmem_cache_alloc(void *ctx) {
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 	}
 
-	return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
+	return record_alloc(ctx, (u64)ptr, bytes_alloc);
 }
 
 SEC("tracepoint/kmem/kmem_cache_alloc_node")
@@ -324,7 +324,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx) {
 		ptr = BPF_CORE_READ(args, ptr);
 		bytes_alloc = BPF_CORE_READ(args, bytes_alloc);
 
-		return gen_alloc_exit2(ctx, (u64)ptr, bytes_alloc);
+		return record_alloc(ctx, (u64)ptr, bytes_alloc);
 	} else {
 		/* tracepoint is disabled if doesn't exist, avoid compile warning */
 		return 0;
@@ -346,7 +346,7 @@ int kmodleak__kmem_cache_free(void *ctx) {
 		ptr = BPF_CORE_READ(args, ptr);
 	}
 
-	return gen_free_enter(ptr);
+	return record_free(ptr);
 }
 
 SEC("tracepoint/kmem/mm_page_alloc")
@@ -354,7 +354,7 @@ int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx) {
 	if (!called_from_module(ctx))
 		return 0;
 
-	return gen_alloc_exit2(ctx, ctx->pfn, page_size << ctx->order);
+	return record_alloc(ctx, ctx->pfn, page_size << ctx->order);
 }
 
 SEC("tracepoint/kmem/mm_page_free")
@@ -362,7 +362,7 @@ int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx) {
 	if (!module_loaded())
 		return 0;
 
-	return gen_free_enter((void *)ctx->pfn);
+	return record_free((void *)ctx->pfn);
 }
 
 SEC("tracepoint/percpu/percpu_alloc_percpu")
@@ -370,7 +370,7 @@ int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ct
 	if (!called_from_module(ctx))
 		return 0;
 
-	return gen_alloc_exit2(ctx, (u64)(ctx->ptr), ctx->bytes_alloc);
+	return record_alloc(ctx, (u64)(ctx->ptr), ctx->bytes_alloc);
 }
 
 SEC("tracepoint/percpu/percpu_free_percpu")
@@ -378,7 +378,7 @@ int kmodleak__percpu_free_percpu(struct trace_event_raw_percpu_free_percpu *ctx)
 	if (!module_loaded())
 		return 0;
 
-	return gen_free_enter(ctx->ptr);
+	return record_free(ctx->ptr);
 }
 
 char LICENSE[] SEC("license") = "GPL";
