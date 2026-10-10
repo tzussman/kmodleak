@@ -125,3 +125,9 @@ def test_leak_from_work_item(kmodleak, modules):
     stacks = r.direct_stacks("leak_work_fn")
     assert len(stacks) == 1
     assert stacks[0].count == 1
+
+
+def test_free_from_other_context(kmodleak, modules):
+    """A free from a different context than the allocation still matches."""
+    r = trace(kmodleak, modules, "noleak_xctx", between=lambda: time.sleep(0.5))
+    assert r.outstanding == 0
