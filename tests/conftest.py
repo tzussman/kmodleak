@@ -29,7 +29,10 @@ def run_as_invoker(args, **kwargs):
     if "SUDO_UID" in os.environ:
         kwargs.setdefault("user", int(os.environ["SUDO_UID"]))
         kwargs.setdefault("group", int(os.environ["SUDO_GID"]))
-    return subprocess.run(args, check=True, **kwargs)
+    proc = subprocess.run(args, capture_output=True, text=True, **kwargs)
+    if proc.returncode != 0:
+        pytest.exit(f"{' '.join(args)} failed:\n{proc.stdout}{proc.stderr}", returncode=2)
+    return proc
 
 
 @pytest.fixture(scope="session")
@@ -53,7 +56,7 @@ class Modules:
 @pytest.fixture(scope="session")
 def modules():
     """The sample modules, built against the running kernel."""
-    run_as_invoker(["make", "-C", str(MODULES_DIR)], stdout=subprocess.DEVNULL)
+    run_as_invoker(["make", "-C", str(MODULES_DIR)])
     return Modules(MODULES_DIR)
 
 
