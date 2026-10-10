@@ -19,6 +19,8 @@ const volatile size_t page_size = 4096;
 const volatile char modtarget[MODULE_NAME_LEN] = "";
 const volatile bool trace_all = false;
 const volatile __u32 max_stack_depth = DEFAULT_MAX_STACK_DEPTH;
+const volatile struct addr_range slab_ranges[SLAB_RANGES_MAX];
+const volatile __u32 nr_slab_ranges = 0;
 
 __u64 module_base = 0;
 __u64 module_size = 0;
@@ -91,6 +93,18 @@ static __always_inline bool in_module(u64 ip) {
 	return (module_base <= ip && ip < module_base + module_size) || in_module_init(ip);
 }
 
+/* ip is in a slab allocator function that allocates pages, see slab_ranges */
+static __always_inline bool in_slab_allocator(u64 ip) {
+	for (u32 i = 0; i < SLAB_RANGES_MAX; i++) {
+		if (i >= nr_slab_ranges)
+			break;
+		if (slab_ranges[i].start <= ip && ip < slab_ranges[i].end)
+			return true;
+	}
+
+	return false;
+}
+
 static void record_mod_sym(u64 ip) {
 	static const char fmt[] = "%pS";
 	struct mod_sym sym;
@@ -122,7 +136,9 @@ static void record_mod_sym(u64 ip) {
  */
 struct walk_ctx {
 	struct stack_trace_t *data;
+	bool check_slab; /* note frames in the slab allocator, for page allocations */
 	bool found;
+	bool via_slab;
 };
 
 static long walk_frame(u64 i, void *ctx) {
@@ -137,6 +153,8 @@ static long walk_frame(u64 i, void *ctx) {
 	if (in_module(ip)) {
 		walk->found = true;
 		record_mod_sym(ip);
+	} else if (walk->check_slab && in_slab_allocator(ip)) {
+		walk->via_slab = true;
 	}
 
 	return 0;
@@ -176,9 +194,12 @@ static int record_free(const void *address) {
 
 /*
  * Checks if the callsite passed through the specified module's text sections.
+ * Page allocations the slab allocator makes while serving the module are not
+ * counted: the object is accounted through the kmem tracepoints, and the page
+ * stays with the slab cache after the object is freed.
  */
-static bool called_from_module(void *ctx) {
-	struct walk_ctx walk = { .found = false };
+static bool called_from_module(void *ctx, bool page_alloc) {
+	struct walk_ctx walk = { .check_slab = page_alloc };
 	struct stack_trace_t *data;
 	long stack_bytes;
 	u32 key = 0;
@@ -206,7 +227,7 @@ static bool called_from_module(void *ctx) {
 	walk.data = data;
 	bpf_loop(data->kern_stack_size, walk_frame, &walk, 0);
 
-	return walk.found;
+	return walk.found && !walk.via_slab;
 }
 
 /*
@@ -303,7 +324,7 @@ int kmodleak__kmalloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, false))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -327,7 +348,7 @@ int kmodleak__kmalloc_node(void *ctx) {
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (!called_from_module(ctx))
+		if (!called_from_module(ctx, false))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -363,7 +384,7 @@ int kmodleak__kmem_cache_alloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, false))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -387,7 +408,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx) {
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (!called_from_module(ctx))
+		if (!called_from_module(ctx, false))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -420,7 +441,7 @@ int kmodleak__kmem_cache_free(void *ctx) {
 
 SEC("tracepoint/kmem/mm_page_alloc")
 int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx) {
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, true))
 		return 0;
 
 	return record_alloc(ctx, ctx->pfn, page_size << ctx->order);
@@ -436,7 +457,7 @@ int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx) {
 
 SEC("tracepoint/percpu/percpu_alloc_percpu")
 int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ctx) {
-	if (!called_from_module(ctx))
+	if (!called_from_module(ctx, false))
 		return 0;
 
 	return record_alloc(ctx, (u64)(ctx->ptr), ctx->bytes_alloc);

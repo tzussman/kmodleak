@@ -1,5 +1,5 @@
 obj-m += leak.o noleak.o
-obj-m += leak_multi.o
+obj-m += leak_multi.o leak_large.o
 obj-m += leak_pages.o noleak_pages.o
 obj-m += leak_percpu.o
 obj-m += leak_core.o

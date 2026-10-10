@@ -393,6 +393,65 @@ void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
 	skel->links.kmodleak__kretprobe__load_module = NULL;
 }
 
+/*
+ * Page allocations made by the slab allocator while serving the module's
+ * kmalloc() are not the module's own, and neither are the pages behind a
+ * large kmalloc(), which is traced as an object. Page allocations whose stack
+ * passes through a function with one of these prefixes are left out. The
+ * exact names differ between kernel versions and slab allocators, so match
+ * prefixes against kallsyms and use whatever exists.
+ */
+static const char *slab_page_func_prefixes[] = {
+	"__kmalloc", "___kmalloc", "kmalloc_large", "kmalloc_order", /* kmalloc and its page-backed sizes */
+	"new_slab", "allocate_slab", "___slab_alloc", "__slab_alloc", /* SLUB slab growth */
+	"kmem_getpages", "cache_grow", /* SLAB, before 6.8 */
+};
+
+static bool is_slab_page_func(const char *name) {
+	for (size_t i = 0; i < sizeof(slab_page_func_prefixes) / sizeof(*slab_page_func_prefixes); i++) {
+		if (strncmp(name, slab_page_func_prefixes[i], strlen(slab_page_func_prefixes[i])) == 0)
+			return true;
+	}
+
+	return false;
+}
+
+static int fill_slab_ranges(struct kmodleak_bpf *skel) {
+	struct ksyms *ks = ksyms__load();
+	size_t n = 0;
+
+	if (!ks)
+		return -1;
+
+	/* syms are sorted by address, so a function ends where the next symbol starts */
+	for (int i = 0; i < ks->syms_sz - 1; i++) {
+		const struct ksym *sym = &ks->syms[i], *next = sym + 1;
+
+		if (!is_slab_page_func(sym->name))
+			continue;
+
+		while (next < ks->syms + ks->syms_sz - 1 && next->addr == sym->addr)
+			next++;
+
+		if (n == SLAB_RANGES_MAX) {
+			fprintf(stderr, "warning: too many slab allocator symbols, ignoring %s\n", sym->name);
+			continue;
+		}
+
+		skel->rodata->slab_ranges[n].start = sym->addr;
+		skel->rodata->slab_ranges[n].end = next->addr;
+		n++;
+	}
+
+	skel->rodata->nr_slab_ranges = n;
+	ksyms__free(ks);
+
+	if (n == 0)
+		fprintf(stderr, "warning: no slab allocator symbols found; slab pages will be attributed to the module\n");
+
+	return 0;
+}
+
 int handle_event(void *ctx, void *data, size_t data_sz) {
 	const struct mod_event *ev = data;
 
@@ -492,6 +551,13 @@ int main(int argc, char **argv) {
 	skel->rodata->trace_all = env.trace_all;
 	skel->rodata->page_size = env.page_size;
 	skel->rodata->max_stack_depth = env.max_stack_depth;
+
+	if (fill_slab_ranges(skel)) {
+		fprintf(stderr, "failed to load kernel symbols\n");
+		ret = 1;
+
+		goto cleanup;
+	}
 	memcpy(skel->rodata->modtarget, env.modname, sizeof(env.modname));
 
 	bpf_map__set_value_size(skel->maps.stack_traces,

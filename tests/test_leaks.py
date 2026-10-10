@@ -58,6 +58,28 @@ def test_multiple_allocations_aggregate(kmodleak, modules):
     assert stack.size >= 10 * 64
 
 
+def test_slab_pages_are_not_attributed(kmodleak, modules):
+    """Pages the slab allocator takes to serve the module's kmallocs are the
+    slab's, not the module's: enough objects to need new slabs must still
+    report only the object stack."""
+    r = trace(kmodleak, modules, "leak_multi", params=("nr_allocs=20000",))
+
+    stacks = [s for s in r.stacks if "leak_multi_init" in s.symbols()]
+    assert len(stacks) == 1
+    assert stacks[0].count == 20000
+
+
+def test_large_kmalloc_counted_once(kmodleak, modules):
+    """A kmalloc too large for a slab cache is served by the page allocator
+    and traced as an object; its pages must not be reported as well."""
+    r = trace(kmodleak, modules, "leak_large")
+
+    stacks = [s for s in r.stacks if "leak_large_init" in s.symbols()]
+    assert len(stacks) == 1
+    assert stacks[0].count == 1
+    assert stacks[0].size >= 256 * 1024
+
+
 def test_page_allocation_leak(kmodleak, modules):
     """Page allocations are tracked by pfn and sized by order."""
     r = trace(kmodleak, modules, "leak_pages")

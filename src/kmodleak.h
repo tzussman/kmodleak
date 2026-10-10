@@ -22,6 +22,14 @@ struct mod_sym {
 	char name[128]; /* bpf_snprintf("%pS") output */
 };
 
+/* Kernel functions whose frames mark a page allocation as the slab allocator's */
+#define SLAB_RANGES_MAX 64
+
+struct addr_range {
+	__u64 start;
+	__u64 end;
+};
+
 struct alloc_info {
 	__u64 size;
 	int stack_id;
