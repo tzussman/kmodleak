@@ -86,3 +86,33 @@ def test_percpu_leak_with_flag(kmodleak, modules):
 def test_percpu_ignored_without_flag(kmodleak, modules):
     r = trace(kmodleak, modules, "leak_percpu")
     assert r.direct_stacks("leak_percpu_init") == []
+
+
+def write_trigger():
+    Path("/sys/module/leak_core/parameters/trigger").write_text("1")
+
+
+def check_core_text_leak(r):
+    stacks = r.direct_stacks("trigger_set")
+    assert len(stacks) == 1
+    stack = stacks[0]
+    assert stack.count == 1
+    assert "leak_core_init" not in stack.symbols()
+
+
+def test_leak_from_core_text(kmodleak, modules):
+    """An allocation after init, from a parameter callback in core text,
+    is attributed to the module and resolved from kallsyms."""
+    def between():
+        # Give kmodleak time to snapshot kallsyms before the module is gone
+        time.sleep(0.5)
+        write_trigger()
+
+    r = trace(kmodleak, modules, "leak_core", between=between)
+    check_core_text_leak(r)
+
+
+@pytest.mark.xfail(reason="core text symbols come from a kallsyms snapshot that races a fast unload")
+def test_leak_from_core_text_fast_unload(kmodleak, modules):
+    r = trace(kmodleak, modules, "leak_core", between=write_trigger)
+    check_core_text_leak(r)
