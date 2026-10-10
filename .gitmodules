@@ -4,3 +4,6 @@
 [submodule "bpftool"]
 	path = bpftool
 	url = https://github.com/libbpf/bpftool
+[submodule "vmlinux.h"]
+	path = vmlinux.h
+	url = https://github.com/libbpf/vmlinux.h.git

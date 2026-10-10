@@ -125,7 +125,16 @@ directory.
 
 ### Installation
 
-TODO
+To install `kmodleak` to `/usr/local/bin`:
+
+```shell
+$ cd src
+$ make
+$ sudo make install
+```
+
+Set `PREFIX` to install somewhere else, e.g. `make install PREFIX=~/.local`.
+`make uninstall` removes the installed binary.
 
 ## Troubleshooting
 

@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 OUTPUT := .output
 CLANG ?= clang
-CC := clang
 LIBBPF_SRC := $(abspath ../libbpf/src)
 BPFTOOL_SRC := $(abspath ../bpftool/src)
 LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a)
@@ -14,13 +13,15 @@ ARCH ?= $(shell uname -m | sed 's/x86_64/x86/' \
 			 | sed 's/mips.*/mips/' \
 			 | sed 's/riscv64/riscv/' \
 			 | sed 's/loongarch64/loongarch/')
-VMLINUX := ../vmlinux/$(ARCH)/vmlinux.h
+VMLINUX := ../vmlinux.h/include/$(ARCH)/vmlinux.h
 # Use our own libbpf API headers and Linux UAPI headers distributed with
 # libbpf to avoid dependency on system-wide headers, which could be missing or
 # outdated
-INCLUDES := -I$(OUTPUT) -I../libbpf/include/uapi -I$(dir $(VMLINUX))
+INCLUDES := -I$(OUTPUT) -I../libbpf/include/uapi -isystem $(dir $(VMLINUX))
 CFLAGS := -g -Wall
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
 
 APPS = kmodleak
 
@@ -53,7 +54,7 @@ define allow-override
     $(eval $(1) = $(2)))
 endef
 
-$(call allow-override,CC,$(CROSS_COMPILE)cc)
+$(call allow-override,CC,$(CLANG))
 $(call allow-override,LD,$(CROSS_COMPILE)ld)
 
 .PHONY: all
@@ -63,6 +64,16 @@ all: $(APPS)
 clean:
 	$(call msg,CLEAN)
 	$(Q)rm -rf $(OUTPUT) $(APPS)
+
+.PHONY: install
+install: $(APPS)
+	$(call msg,INSTALL,$(DESTDIR)$(BINDIR)/$(APPS))
+	$(Q)install -D -m 0755 -t $(DESTDIR)$(BINDIR) $(APPS)
+
+.PHONY: uninstall
+uninstall:
+	$(call msg,UNINSTALL,$(DESTDIR)$(BINDIR)/$(APPS))
+	$(Q)rm -f $(addprefix $(DESTDIR)$(BINDIR)/,$(APPS))
 
 $(OUTPUT) $(OUTPUT)/libbpf $(BPFTOOL_OUTPUT):
 	$(call msg,MKDIR,$@)
@@ -79,13 +90,14 @@ $(LIBBPF_OBJ): $(wildcard $(LIBBPF_SRC)/*.[ch] $(LIBBPF_SRC)/Makefile) | $(OUTPU
 # Build bpftool
 $(BPFTOOL): | $(BPFTOOL_OUTPUT)
 	$(call msg,BPFTOOL,$@)
-	$(Q)$(MAKE) ARCH= CROSS_COMPILE= OUTPUT=$(BPFTOOL_OUTPUT)/ -C $(BPFTOOL_SRC) bootstrap
+	$(Q)$(MAKE) ARCH= CROSS_COMPILE= SKIP_CRYPTO=1 OUTPUT=$(BPFTOOL_OUTPUT)/ -C $(BPFTOOL_SRC) bootstrap
 
 # Build BPF code
-$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(wildcard %.h) $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
+$(OUTPUT)/%.bpf.o: %.bpf.c $(LIBBPF_OBJ) $(VMLINUX) | $(OUTPUT) $(BPFTOOL)
 	$(call msg,BPF,$@)
 	$(Q)$(CLANG) $(CFLAGS) -O2 -target bpf -D__TARGET_ARCH_$(ARCH)		      \
 		     $(INCLUDES) $(CLANG_BPF_SYS_INCLUDES)		      \
+		     -MT $@ -MMD -MP -MF $(patsubst %.bpf.o,%.bpf.d,$@)		      \
 		     -c $(filter %.c,$^) -o $(patsubst %.bpf.o,%.tmp.bpf.o,$@)
 	$(Q)$(BPFTOOL) gen object $@ $(patsubst %.bpf.o,%.tmp.bpf.o,$@)
 
@@ -97,14 +109,17 @@ $(OUTPUT)/%.skel.h: $(OUTPUT)/%.bpf.o | $(OUTPUT) $(BPFTOOL)
 # Build user-space code
 $(patsubst %,$(OUTPUT)/%.o,$(APPS)): %.o: %.skel.h
 
-$(OUTPUT)/%.o: %.c $(wildcard %.h) | $(OUTPUT)
+$(OUTPUT)/%.o: %.c | $(OUTPUT)
 	$(call msg,CC,$@)
-	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -c $(filter %.c,$^) -o $@
+	$(Q)$(CC) $(CFLAGS) $(INCLUDES) -MMD -MP -c $(filter %.c,$^) -o $@
 
 # Build application binary
 $(APPS): %: $(OUTPUT)/%.o $(LIBBPF_OBJ) | $(OUTPUT)
 	$(call msg,BINARY,$@)
 	$(Q)$(CC) $(CFLAGS) $^ $(ALL_LDFLAGS) -lelf -lz -o $@
+
+# Compiler-generated header dependencies (-MMD).
+-include $(wildcard $(OUTPUT)/*.d)
 
 # delete failed targets
 .DELETE_ON_ERROR:
