@@ -63,14 +63,16 @@ def modules():
 @pytest.fixture
 def kmodleak(kmodleak_bin):
     """Factory for a traced kmodleak run: kmodleak("module", "-P") starts
-    kmodleak and returns once it is tracing. Everything started is stopped,
-    and any module it loaded unloaded, when the test ends."""
+    kmodleak and returns once it is tracing, or immediately with wait=False.
+    Everything started is stopped, and any module it loaded unloaded, when
+    the test ends."""
     started = []
 
-    def start(module, *flags, timeout=30):
+    def start(module, *flags, timeout=30, wait=True):
         k = Kmodleak(kmodleak_bin, module, flags, timeout=timeout)
         started.append(k)
-        k.wait_tracing()
+        if wait:
+            k.wait_tracing()
         return k
 
     yield start
