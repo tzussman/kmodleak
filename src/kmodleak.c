@@ -49,7 +49,7 @@ struct allocation_node {
 };
 
 struct allocation {
-	uint64_t stack_id;
+	int stack_id;
 	size_t size;
 	size_t count;
 	struct allocation_node *allocations;
