@@ -205,3 +205,9 @@ def test_dash_in_module_name(kmodleak, modules):
 
     assert r.loaded and r.unloaded
     assert len(r.direct_stacks("leak_dash_init")) == 1
+
+
+@pytest.mark.xfail(reason="kfree_rcu() frees land after module_free and bypass the kfree tracepoint")
+def test_kfree_rcu_in_exit(kmodleak, modules):
+    r = trace(kmodleak, modules, "noleak_rcu")
+    assert r.outstanding == 0
