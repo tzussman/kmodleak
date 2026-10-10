@@ -6,13 +6,17 @@ on:
       - main
     paths-ignore:
       - '**.md'
+      - '**/.gitignore'
       - 'LICENSE'
-      - '.gitignore'
+      - '.clang-format'
+      - '.github/dependabot.yml'
   pull_request:
     paths-ignore:
       - '**.md'
+      - '**/.gitignore'
       - 'LICENSE'
-      - '.gitignore'
+      - '.clang-format'
+      - '.github/dependabot.yml'
   workflow_dispatch:
 
 jobs:

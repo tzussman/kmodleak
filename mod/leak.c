@@ -5,15 +5,15 @@ static void *ptr;
 
 static int __init leak_init(void)
 {
-    pr_info("Loading leak module...\n");
-    ptr = kmalloc(100, GFP_KERNEL);
-    return 0;
+	pr_info("Loading leak module...\n");
+	ptr = kmalloc(100, GFP_KERNEL);
+	return 0;
 }
 
 static void __exit leak_exit(void)
 {
-    pr_info("Unloading leak module...\n");
-    //kfree(ptr);
+	pr_info("Unloading leak module...\n");
+	//kfree(ptr);
 }
 
 module_init(leak_init);

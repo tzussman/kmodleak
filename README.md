@@ -20,19 +20,25 @@ is intended to serve as a lightweight replacement for its memory leak detector.*
 
 ## Setup
 
+### Requirements
+
+`kmodleak` must be run as root on a kernel built with `CONFIG_DEBUG_INFO_BTF`,
+`CONFIG_KPROBES` and `CONFIG_BPF_EVENTS`. Linux 5.8 or later is required for
+the BPF ring buffer.
+
 ### Install Dependencies
 
-You will need `clang` (at least v17 or later), `libelf` and `zlib` to build
-the examples, package names may vary across distros.
+You will need `clang` (v17 or later), `gcc`, `make`, `libelf` and `zlib` to
+build `kmodleak`. Package names may vary across distros.
 
 On Ubuntu/Debian, you need:
 ```shell
-$ apt install clang libelf1 libelf-dev zlib1g-dev
+$ apt install clang gcc make libelf1 libelf-dev zlib1g-dev
 ```
 
 On CentOS/Fedora, you need:
 ```shell
-$ dnf install clang elfutils-libelf elfutils-libelf-devel zlib-devel
+$ dnf install clang gcc make elfutils-libelf elfutils-libelf-devel zlib-devel
 ```
 
 If your distribution does not offer a recent enough version of `clang`, see
@@ -47,7 +53,7 @@ $ git clone --recurse-submodules https://github.com/tzussman/kmodleak
 
 ### Building
 
-Makefile build:
+Build with `make` and run the result as root:
 
 ```console
 $ git submodule update --init --recursive       # check out libbpf
@@ -88,6 +94,16 @@ done
 3. **Use the module** - Exercise your module's functionality
 4. **Unload the module** - Remove the module with `rmmod`
 5. **View results** - `kmodleak` automatically exits and shows any detected leaks
+
+### Options
+
+- `-t`, `--trace`: print a message for each traced allocation and free to the
+  kernel trace buffer (`/sys/kernel/tracing/trace_pipe`)
+- `-P`, `--percpu`: also trace per-CPU allocations
+- `-v`, `--verbose`: print libbpf debug messages
+
+Hitting Ctrl-C before the module is unloaded ends tracing early and prints the
+allocations outstanding at that point.
 
 ### Basic Example
 

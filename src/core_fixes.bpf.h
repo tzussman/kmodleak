@@ -10,6 +10,8 @@
 #include "vmlinux.h"
 #include <bpf/bpf_core_read.h>
 
+#include "kmodleak.h"
+
 /**
  * commit 3544de8ee6e4("mm, tracing: record slab name for kmem_cache_free()")
  * replaces `trace_event_raw_kmem_free` with `trace_event_raw_kfree` and adds
@@ -97,10 +99,6 @@ static __always_inline bool has_kmem_alloc(void) {
  * see:
  *    https://github.com/torvalds/linux/commit/ac3b43283923
  */
-
-#ifndef MODULE_NAME_LEN
-#define MODULE_NAME_LEN 56 /* /include/linux/module.h */
-#endif
 
 /* /include/linux/module.h v6.4+ */
 enum mod_mem_type___x {
