@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause) */
 /*
  * Taken from https://github.com/iovisor/bcc/blob/master/libbpf-tools/core_fixes.bpf.h
  * Copyright (c) 2021 Hengqi Chen

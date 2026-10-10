@@ -85,7 +85,7 @@ done
 
 1. **Start kmodleak** - Run `kmodleak` with the module name you want to monitor
 2. **Load the module** - In another terminal, load your kernel module with `insmod`
-3. **Use the module** - Exercise your module's functionality  
+3. **Use the module** - Exercise your module's functionality
 4. **Unload the module** - Remove the module with `rmmod`
 5. **View results** - `kmodleak` automatically exits and shows any detected leaks
 

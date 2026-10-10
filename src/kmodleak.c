@@ -1,6 +1,6 @@
-/* 
+/*
  * kmodleak
- * Copyright (c) 2023 Tal Zussman 
+ * Copyright (c) 2023 Tal Zussman
  *
  * Based on memleak(8) from BCC by Sasha Goldshtein, JP Kobryn, and others
  * https://github.com/iovisor/bcc/blob/master/libbpf-tools/memleak.c
@@ -49,7 +49,7 @@ struct allocation_node {
 };
 
 struct allocation {
-	uint64_t stack_id;
+	int stack_id;
 	size_t size;
 	size_t count;
 	struct allocation_node *allocations;
@@ -105,7 +105,13 @@ error_t argp_parse_arg(int key, char *arg, struct argp_state *state) {
 		pos_args++;
 
 		if (pos_args == 1) {
-			memcpy(env.modname, arg, sizeof(env.modname));
+			if (strlen(arg) >= MODULE_NAME_LEN) {
+				fprintf(stderr, "module name '%s' too long; must be < %d chars\n", arg,
+					MODULE_NAME_LEN);
+				argp_usage(state);
+			}
+
+			strcpy(env.modname, arg);
 		} else {
 			fprintf(stderr, "Unrecognized positional argument: %s\n", arg);
 			argp_usage(state);
@@ -200,7 +206,7 @@ int alloc_size_compare(const void *a, const void *b) {
 }
 
 int print_allocs(int allocs_fd, int stack_traces_fd) {
-	size_t nr_allocs = 0;
+	size_t nr_allocs = 0, nr_nostack = 0, nostack_size = 0;
 	int ret = 0;
 
 	struct allocation *allocs = calloc(ALLOCS_MAX_ENTRIES, sizeof(*allocs));
@@ -234,9 +240,15 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 			goto cleanup;
 		}
 
-		// filter invalid stacks
-		if (alloc_info.stack_id < 0)
+		/*
+		 * bpf_get_stackid() fails when the stack map is full or on a
+		 * hash collision. Count these so that they are not hidden.
+		 */
+		if (alloc_info.stack_id < 0) {
+			nr_nostack++;
+			nostack_size += alloc_info.size;
 			continue;
+		}
 
 		// when the stack_id exists in the allocs array,
 		//   increment size with alloc_info.size
@@ -300,6 +312,10 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 
 	print_stack_frames(allocs, nr_allocs, stack_traces_fd);
 
+	if (nr_nostack)
+		printf("%zu bytes in %zu allocations with no stack trace available\n",
+		       nostack_size, nr_nostack);
+
 	// Free allocs list
 	for (size_t i = 0; i < nr_allocs; i++) {
 		struct allocation_node *it = allocs[i].allocations;
@@ -330,12 +346,14 @@ void disable_kernel_percpu_tracepoints(struct kmodleak_bpf *skel) {
 	bpf_program__set_autoload(skel->progs.kmodleak__percpu_free_percpu, false);
 }
 
-void disable_kernel_module_load_tracepoint(struct kmodleak_bpf *skel) {
-	bpf_program__set_autoload(skel->progs.kmodleak__module_load, false);
+void detach_kernel_module_load_tracepoint(struct kmodleak_bpf *skel) {
+	bpf_link__destroy(skel->links.kmodleak__module_load);
+	skel->links.kmodleak__module_load = NULL;
 }
 
-void disable_kernel_module_init_tracepoint(struct kmodleak_bpf *skel) {
-	bpf_program__set_autoload(skel->progs.kmodleak__kretprobe__load_module, false);
+void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
+	bpf_link__destroy(skel->links.kmodleak__kretprobe__load_module);
+	skel->links.kmodleak__kretprobe__load_module = NULL;
 }
 
 int handle_event(void *ctx, void *data, size_t data_sz) {
@@ -344,7 +362,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 	if (d->val == MOD_LOADED) {
 		mod_loaded = true;
 
-		disable_kernel_module_load_tracepoint(skel);
+		detach_kernel_module_load_tracepoint(skel);
 
 		/*
 		 * Module symbols are only added to kallsyms after the module is
@@ -358,7 +376,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 
 		printf("module '%s' loaded\n", env.modname);
 	} else if (d->val == MOD_INITIALIZED) {
-		disable_kernel_module_init_tracepoint(skel);
+		detach_kernel_module_init_kretprobe(skel);
 	} else if (d->val == MOD_FREED) {
 		if (!mod_loaded) {
 			fprintf(stderr, "error: module '%s' freed before loaded\n", env.modname);
@@ -375,7 +393,6 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 int main(int argc, char **argv) {
 	int ret = 0;
 	struct ring_buffer *events = NULL;
-	int modlen;
 	struct sigaction sa;
 
 	static const struct argp argp = {
@@ -384,11 +401,13 @@ int main(int argc, char **argv) {
 		.doc = argp_args_doc,
 	};
 
+	// Make progress messages visible as they happen when redirected to a file
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	// Parse command line args to env settings
 	if (argp_parse(&argp, argc, argv, 0, NULL, NULL)) {
 		fprintf(stderr, "failed to parse args\n");
-
-		goto cleanup;
+		return 1;
 	}
 
 	memset(&sa, 0, sizeof(sa));
@@ -396,7 +415,7 @@ int main(int argc, char **argv) {
 	sa.sa_handler = sig_handler;
 
 	// Install signal handler
-	if (sigaction(SIGINT, &sa, NULL)) {
+	if (sigaction(SIGINT, &sa, NULL) || sigaction(SIGTERM, &sa, NULL)) {
 		perror("failed to set up signal handling");
 		ret = -errno;
 
@@ -404,15 +423,8 @@ int main(int argc, char **argv) {
 	}
 
 	// Post-processing and validation of env settings
-	modlen = strlen(env.modname);
-	if (modlen == 0) {
+	if (env.modname[0] == '\0') {
 		fprintf(stderr, "kmodleak: missing module name\n");
-		return 1;
-	}
-
-	if (modlen >= MODULE_NAME_LEN) {
-		fprintf(stderr, "module name '%s' too long; must be < %d chars\n", env.modname,
-			MODULE_NAME_LEN);
 		return 1;
 	}
 
@@ -437,6 +449,7 @@ int main(int argc, char **argv) {
 	}
 
 	skel->rodata->trace_all = env.trace_all;
+	skel->rodata->page_size = env.page_size;
 	memcpy(skel->rodata->modtarget, env.modname, sizeof(env.modname));
 
 	bpf_map__set_value_size(skel->maps.stack_traces,
@@ -493,7 +506,8 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	print_allocs(allocs_fd, stack_traces_fd);
+	if (print_allocs(allocs_fd, stack_traces_fd))
+		ret = 1;
 
 cleanup:
 	ksyms__free(ksyms);

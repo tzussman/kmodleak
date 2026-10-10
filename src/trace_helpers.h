@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause) */
 /*
  * Taken from https://github.com/iovisor/bcc/blob/master/libbpf-tools/trace_helpers.c
  * Copyright (c) 2020 Wenbo Zhang
@@ -181,25 +182,11 @@ static inline const struct ksym *ksyms__get_symbol(const struct ksyms *ksyms, co
 }
 
 static inline bool is_kernel_module(const char *name) {
-	bool found = false;
-	char buf[64];
-	FILE *f;
+	char path[PATH_MAX];
 
-	f = fopen("/proc/modules", "r");
-	if (!f)
-		return false;
-
-	while (fgets(buf, sizeof(buf), f) != NULL) {
-		if (sscanf(buf, "%s %*s\n", buf) != 1)
-			break;
-		if (!strcmp(buf, name)) {
-			found = true;
-			break;
-		}
-	}
-
-	fclose(f);
-	return found;
+	/* initstate only exists for loaded modules, not built-in ones */
+	snprintf(path, sizeof(path), "/sys/module/%s/initstate", name);
+	return access(path, F_OK) == 0;
 }
 
 #endif /* __TRACE_HELPERS_H */
