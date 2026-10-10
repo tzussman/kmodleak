@@ -131,3 +131,24 @@ def test_free_from_other_context(kmodleak, modules):
     """A free from a different context than the allocation still matches."""
     r = trace(kmodleak, modules, "noleak_xctx", between=lambda: time.sleep(0.5))
     assert r.outstanding == 0
+
+
+def test_kmem_cache_alloc_outstanding(kmodleak, modules):
+    """An object from a private slab cache shows as outstanding while the
+    module is loaded, reported on SIGINT."""
+    k = kmodleak("cache_alloc")
+    k.insmod(modules.ko("cache_alloc"))
+    k.signal(signal.SIGINT)
+    r = k.wait_exit()
+    k.rmmod()
+
+    assert r.returncode == 0 and r.done
+    assert r.loaded and not r.unloaded
+    # kmem_cache_create() allocates sysfs nodes from the module's init too;
+    # only the object allocated directly by the module is of interest
+    stacks = r.direct_stacks("cache_alloc_init")
+    assert len(stacks) == 1
+    stack = stacks[0]
+    assert stack.count == 1
+    assert stack.size >= 64
+    assert any("kmem_cache_alloc" in s for s in stack.symbols())
