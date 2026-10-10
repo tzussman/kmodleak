@@ -115,7 +115,9 @@ error_t argp_parse_arg(int key, char *arg, struct argp_state *state) {
 				argp_usage(state);
 			}
 
-			strcpy(env.modname, arg);
+			/* The kernel names modules with underscores where files have dashes */
+			for (size_t i = 0; arg[i]; i++)
+				env.modname[i] = arg[i] == '-' ? '_' : arg[i];
 		} else {
 			fprintf(stderr, "Unrecognized positional argument: %s\n", arg);
 			argp_usage(state);

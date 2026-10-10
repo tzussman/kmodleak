@@ -195,15 +195,16 @@ def test_longest_module_name(kmodleak, modules):
     assert len(r.direct_stacks("longname_init")) == 1
 
 
-@pytest.mark.xfail(reason="dashes in module names are not normalised to underscores yet")
 def test_dash_in_module_name(kmodleak, modules):
-    """insmod leak-dash.ko loads a module named leak_dash."""
-    k = kmodleak("leak-dash", timeout=10)
+    """insmod leak-dash.ko loads a module named leak_dash, and the name may
+    be given either way."""
+    k = kmodleak("leak-dash")
     k.insmod(modules.ko("leak-dash"))
     k.rmmod("leak_dash")
     r = k.wait_exit()
 
     assert r.loaded and r.unloaded
+    assert "module 'leak_dash' loaded" in r.output
     assert len(r.direct_stacks("leak_dash_init")) == 1
 
 
