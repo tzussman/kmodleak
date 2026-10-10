@@ -405,8 +405,7 @@ int main(int argc, char **argv) {
 	// Parse command line args to env settings
 	if (argp_parse(&argp, argc, argv, 0, NULL, NULL)) {
 		fprintf(stderr, "failed to parse args\n");
-
-		goto cleanup;
+		return 1;
 	}
 
 	memset(&sa, 0, sizeof(sa));
@@ -505,7 +504,8 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	print_allocs(allocs_fd, stack_traces_fd);
+	if (print_allocs(allocs_fd, stack_traces_fd))
+		ret = 1;
 
 cleanup:
 	ksyms__free(ksyms);
