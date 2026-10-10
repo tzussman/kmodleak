@@ -1,5 +1,4 @@
-# mod
+# modules
 
-Sample modules for `kmodleak` testing.
-
-Run `make` to build the modules and `./test.sh` to test them.
+Sample modules for the `kmodleak` test suite. They are built against the
+running kernel by the test fixtures; run `make` here to build them by hand.
