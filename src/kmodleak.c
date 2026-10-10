@@ -141,7 +141,14 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 		if (addr == 0)
 			break;
 
-		const struct ksym *ksym = ksyms__map_addr(ksyms, addr);
+		/*
+		 * Frame 0 is the instruction pointer when the stack was captured.
+		 * Every other frame is a return address, which is the first byte
+		 * of the next function when the call was the caller's last
+		 * instruction, so look up the preceding byte to attribute it to
+		 * the caller.
+		 */
+		const struct ksym *ksym = ksyms__map_addr(ksyms, i == 0 ? addr : addr - 1);
 
 		/*
 		 * Print the stack frames. Give the frame index a field width of 3,
