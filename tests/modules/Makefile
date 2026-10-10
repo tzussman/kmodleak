@@ -3,6 +3,7 @@ obj-m += leak_multi.o
 obj-m += leak_pages.o noleak_pages.o
 obj-m += leak_percpu.o
 obj-m += leak_core.o
+obj-m += leak_work.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 

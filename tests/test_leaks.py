@@ -116,3 +116,12 @@ def test_leak_from_core_text(kmodleak, modules):
 def test_leak_from_core_text_fast_unload(kmodleak, modules):
     r = trace(kmodleak, modules, "leak_core", between=write_trigger)
     check_core_text_leak(r)
+
+
+def test_leak_from_work_item(kmodleak, modules):
+    """An allocation from a kworker is attributed via the module's frame."""
+    r = trace(kmodleak, modules, "leak_work", between=lambda: time.sleep(0.5))
+
+    stacks = r.direct_stacks("leak_work_fn")
+    assert len(stacks) == 1
+    assert stacks[0].count == 1
