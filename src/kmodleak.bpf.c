@@ -88,10 +88,12 @@ static int gen_free_enter(const void *address) {
 }
 
 static bool iterate_stack_trace(struct stack_trace_t *data) {
-	volatile long stack_size = data->kern_stack_size; // verifier hack
+	volatile long stack_size; // verifier hack
 
 	if (!data)
 		return false;
+
+	stack_size = data->kern_stack_size;
 
 	if (stack_size > PERF_MAX_STACK_DEPTH)
 		return false;
@@ -117,6 +119,7 @@ static bool iterate_stack_trace(struct stack_trace_t *data) {
  */
 static bool called_from_module(void *ctx) {
 	struct stack_trace_t *data;
+	long stack_bytes;
 	u32 key = 0;
 
 	if (!module_loaded())
@@ -126,15 +129,14 @@ static bool called_from_module(void *ctx) {
 	if (!data)
 		return false;
 
-	data->kern_stack_size = bpf_get_stack(ctx, data->kern_stack, sizeof(data->kern_stack), 0);
-
-	// bpf_get_stack() returns number of bytes available, divide by array type size
-	data->kern_stack_size /= sizeof(*data->kern_stack);
-
-	if (data->kern_stack_size < 0) {
-		bpf_printk("bpf_get_stack() failed: %d\n", data->kern_stack_size);
+	stack_bytes = bpf_get_stack(ctx, data->kern_stack, sizeof(data->kern_stack), 0);
+	if (stack_bytes < 0) {
+		bpf_printk("bpf_get_stack() failed: %ld\n", stack_bytes);
 		return false;
 	}
+
+	// bpf_get_stack() returns number of bytes available, divide by array type size
+	data->kern_stack_size = stack_bytes / sizeof(*data->kern_stack);
 
 	if (!iterate_stack_trace(data))
 		return false;
