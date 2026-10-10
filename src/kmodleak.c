@@ -440,6 +440,7 @@ int main(int argc, char **argv) {
 	}
 
 	skel->rodata->trace_all = env.trace_all;
+	skel->rodata->page_size = env.page_size;
 	memcpy(skel->rodata->modtarget, env.modname, sizeof(env.modname));
 
 	bpf_map__set_value_size(skel->maps.stack_traces,
