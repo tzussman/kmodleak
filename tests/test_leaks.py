@@ -55,3 +55,19 @@ def test_multiple_allocations_aggregate(kmodleak, modules):
     assert len(stack.allocations) == 10
     assert stack.size == sum(size for _, size in stack.allocations)
     assert stack.size >= 10 * 64
+
+
+def test_page_allocation_leak(kmodleak, modules):
+    """Page allocations are tracked by pfn and sized by order."""
+    r = trace(kmodleak, modules, "leak_pages")
+
+    stacks = r.direct_stacks("leak_pages_init")
+    assert len(stacks) == 1
+    stack = stacks[0]
+    assert stack.count == 1
+    assert stack.size == 2 * PAGE_SIZE
+
+
+def test_page_allocation_freed(kmodleak, modules):
+    r = trace(kmodleak, modules, "noleak_pages")
+    assert r.outstanding == 0
