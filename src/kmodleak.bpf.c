@@ -129,7 +129,8 @@ static bool called_from_module(void *ctx) {
 	if (!data)
 		return false;
 
-	stack_bytes = bpf_get_stack(ctx, data->kern_stack, sizeof(data->kern_stack), 0);
+	stack_bytes = bpf_get_stack(ctx, data->kern_stack,
+				    PERF_MAX_STACK_DEPTH * sizeof(*data->kern_stack), 0);
 	if (stack_bytes < 0) {
 		bpf_printk("bpf_get_stack() failed: %ld\n", stack_bytes);
 		return false;
