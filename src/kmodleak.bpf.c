@@ -224,7 +224,12 @@ static bool called_from_module(void *ctx) {
 	return true;
 }
 
-static inline int strncmp_mod(const char *s1, const char *s2) {
+/*
+ * s2 is the modtarget rodata, which libbpf fills in before the program is
+ * loaded. It must stay volatile all the way down to the access, otherwise
+ * the compiler is free to fold the reads to its empty initializer.
+ */
+static inline int strncmp_mod(const char *s1, const volatile char *s2) {
 	int n = MODULE_NAME_LEN;
 	while (n && *s1 && (*s1 == *s2)) {
 		++s1;
@@ -246,7 +251,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
-	if (strncmp_mod(modname, (const char *)modtarget) != 0)
+	if (strncmp_mod(modname, modtarget) != 0)
 		return 0;
 
 	fill_module_text_layout(mod, &module_base, &module_size, &module_init_base,
@@ -293,7 +298,7 @@ int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
-	if (strncmp_mod(modname, (const char *)modtarget) != 0)
+	if (strncmp_mod(modname, modtarget) != 0)
 		return 0;
 
 	mod_unloaded = bpf_ringbuf_reserve(&events, sizeof(*mod_unloaded), 0);

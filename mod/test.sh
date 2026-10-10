@@ -2,22 +2,20 @@
 
 # Test script that runs kmodleak, loads module, unloads module, and checks output
 
-# Wait up to 10 seconds for the given process to exit
-wait_for_exit() {
-    for _ in $(seq 1 100); do
-        if ! kill -0 "$1" 2> /dev/null; then
-            return 0
-        fi
-        sleep 0.1
-    done
-    return 1
-}
+# Seconds to wait for kmodleak to exit on its own after the module is unloaded
+KMODLEAK_TIMEOUT=30
 
-stop_kmodleak() {
-    if kill -0 "$1" 2> /dev/null; then
-        sudo kill "$1"
-    fi
-    wait "$1" 2> /dev/null
+# Print why a test failed along with kmodleak's output, and stop kmodleak if it
+# is still running
+fail() {
+    echo "$1"
+    echo "--- kmodleak output:"
+    cat "$output"
+    echo "---"
+    sudo kill "$kmodleak_pid" 2> /dev/null
+    wait "$kmodleak_pid" 2> /dev/null
+    rm -f "$output"
+    return 1
 }
 
 run_test() {
@@ -26,7 +24,7 @@ run_test() {
     output="out_$module"
 
     echo "Running kmodleak on module '$module'..."
-    sudo ../src/kmodleak "$module" > "$output" &
+    sudo timeout $KMODLEAK_TIMEOUT ../src/kmodleak "$module" > "$output" 2>&1 &
     kmodleak_pid=$!
 
     echo "kmodleak running on PID $kmodleak_pid"
@@ -40,43 +38,37 @@ run_test() {
     done
 
     if ! grep -q "Tracing module memory allocs" "$output"; then
-        echo "kmodleak did not start tracing:"
-        cat "$output"
-        stop_kmodleak $kmodleak_pid
-        rm "$output"
+        fail "kmodleak did not start tracing"
         return 1
     fi
 
     echo "Loading module..."
     if ! sudo insmod "$module.ko"; then
-        echo "Failed to load module $module"
-        stop_kmodleak $kmodleak_pid
-        rm "$output"
+        fail "Failed to load module $module"
         return 1
     fi
 
     echo "Unloading module..."
     if ! sudo rmmod "$module"; then
-        echo "Failed to unload module $module"
-        stop_kmodleak $kmodleak_pid
-        rm "$output"
+        fail "Failed to unload module $module"
         return 1
     fi
 
-    # kmodleak exits on its own once the module is unloaded.
-    if ! wait_for_exit $kmodleak_pid; then
-        echo "kmodleak did not exit after module unload"
-        stop_kmodleak $kmodleak_pid
-        rm "$output"
+    # kmodleak exits on its own once the module is unloaded; timeout kills it
+    # with SIGTERM otherwise, which makes it print what it has.
+    wait "$kmodleak_pid"
+    status=$?
+    if [ $status -eq 124 ]; then
+        fail "kmodleak did not exit within $KMODLEAK_TIMEOUT seconds of module unload"
+        return 1
+    elif [ $status -ne 0 ]; then
+        fail "kmodleak exited with status $status"
         return 1
     fi
-    wait $kmodleak_pid
 
     echo "Checking output..."
     if ! grep -q "$expected_output" "$output"; then
-        echo "Output does not contain expected output:"
-        cat "$output"
-        rm "$output"
+        fail "Output does not contain '$expected_output'"
         return 1
     fi
 
