@@ -346,12 +346,14 @@ void disable_kernel_percpu_tracepoints(struct kmodleak_bpf *skel) {
 	bpf_program__set_autoload(skel->progs.kmodleak__percpu_free_percpu, false);
 }
 
-void disable_kernel_module_load_tracepoint(struct kmodleak_bpf *skel) {
-	bpf_program__set_autoload(skel->progs.kmodleak__module_load, false);
+void detach_kernel_module_load_tracepoint(struct kmodleak_bpf *skel) {
+	bpf_link__destroy(skel->links.kmodleak__module_load);
+	skel->links.kmodleak__module_load = NULL;
 }
 
-void disable_kernel_module_init_tracepoint(struct kmodleak_bpf *skel) {
-	bpf_program__set_autoload(skel->progs.kmodleak__kretprobe__load_module, false);
+void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
+	bpf_link__destroy(skel->links.kmodleak__kretprobe__load_module);
+	skel->links.kmodleak__kretprobe__load_module = NULL;
 }
 
 int handle_event(void *ctx, void *data, size_t data_sz) {
@@ -360,7 +362,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 	if (d->val == MOD_LOADED) {
 		mod_loaded = true;
 
-		disable_kernel_module_load_tracepoint(skel);
+		detach_kernel_module_load_tracepoint(skel);
 
 		/*
 		 * Module symbols are only added to kallsyms after the module is
@@ -374,7 +376,7 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 
 		printf("module '%s' loaded\n", env.modname);
 	} else if (d->val == MOD_INITIALIZED) {
-		disable_kernel_module_init_tracepoint(skel);
+		detach_kernel_module_init_kretprobe(skel);
 	} else if (d->val == MOD_FREED) {
 		if (!mod_loaded) {
 			fprintf(stderr, "error: module '%s' freed before loaded\n", env.modname);
