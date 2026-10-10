@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 OUTPUT := .output
 CLANG ?= clang
-CC := clang
 LIBBPF_SRC := $(abspath ../libbpf/src)
 BPFTOOL_SRC := $(abspath ../bpftool/src)
 LIBBPF_OBJ := $(abspath $(OUTPUT)/libbpf.a)
@@ -53,7 +52,7 @@ define allow-override
     $(eval $(1) = $(2)))
 endef
 
-$(call allow-override,CC,$(CROSS_COMPILE)cc)
+$(call allow-override,CC,$(CLANG))
 $(call allow-override,LD,$(CROSS_COMPILE)ld)
 
 .PHONY: all
