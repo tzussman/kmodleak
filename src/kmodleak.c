@@ -105,7 +105,13 @@ error_t argp_parse_arg(int key, char *arg, struct argp_state *state) {
 		pos_args++;
 
 		if (pos_args == 1) {
-			memcpy(env.modname, arg, sizeof(env.modname));
+			if (strlen(arg) >= MODULE_NAME_LEN) {
+				fprintf(stderr, "module name '%s' too long; must be < %d chars\n", arg,
+					MODULE_NAME_LEN);
+				argp_usage(state);
+			}
+
+			strcpy(env.modname, arg);
 		} else {
 			fprintf(stderr, "Unrecognized positional argument: %s\n", arg);
 			argp_usage(state);
@@ -375,7 +381,6 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 int main(int argc, char **argv) {
 	int ret = 0;
 	struct ring_buffer *events = NULL;
-	int modlen;
 	struct sigaction sa;
 
 	static const struct argp argp = {
@@ -407,15 +412,8 @@ int main(int argc, char **argv) {
 	}
 
 	// Post-processing and validation of env settings
-	modlen = strlen(env.modname);
-	if (modlen == 0) {
+	if (env.modname[0] == '\0') {
 		fprintf(stderr, "kmodleak: missing module name\n");
-		return 1;
-	}
-
-	if (modlen >= MODULE_NAME_LEN) {
-		fprintf(stderr, "module name '%s' too long; must be < %d chars\n", env.modname,
-			MODULE_NAME_LEN);
 		return 1;
 	}
 
