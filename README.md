@@ -23,8 +23,8 @@ is intended to serve as a lightweight replacement for its memory leak detector.*
 ### Requirements
 
 `kmodleak` must be run as root on a kernel built with `CONFIG_DEBUG_INFO_BTF`,
-`CONFIG_KPROBES` and `CONFIG_BPF_EVENTS`. Linux 5.8 or later is required for
-the BPF ring buffer.
+`CONFIG_KPROBES` and `CONFIG_BPF_EVENTS`. Linux 5.13 or later is required for
+the BPF helpers used.
 
 ### Install Dependencies
 
@@ -67,21 +67,22 @@ module 'leak' unloaded
 
 1 stacks with outstanding allocations:
 128 bytes in 1 allocations from stack
-        addr = 0xffff00008ba60f00 size = 128
-          0 [<ffff80000834df84>] kmalloc_trace+0xf0
-          1 [<ffff80000834df84>] kmalloc_trace+0xf0
-          2 [<ffff800032f2f060>] leak_init+0x34
-          3 [<ffff800008074dd0>] do_one_initcall+0x60
-          4 [<ffff8000081b3404>] do_init_module+0x50
-          5 [<ffff8000081b5458>] load_module+0x1cb8
-          6 [<ffff8000081b5c7c>] __do_sys_finit_module+0xac
-          7 [<ffff8000081b5d88>] __arm64_sys_finit_module+0x28
-          8 [<ffff800008089bd8>] invoke_syscall+0x78
-          9 [<ffff800008089cac>] el0_svc_common.constprop.0+0x4c
-         10 [<ffff800008089d88>] do_el0_svc+0x34
-         11 [<ffff800008d03794>] el0_svc+0x34
-         12 [<ffff800008d04cd4>] el0t_64_sync_handler+0xf4
-         13 [<ffff800008071548>] el0t_64_sync+0x18c
+        addr = 0xffff0000cb2c1500 size = 128
+          0 [<ffff80008038567c>] __traceiter_kmalloc+0x74
+          1 [<ffff80008038567c>] __traceiter_kmalloc+0x74
+          2 [<ffff8000803f5d68>] __kmalloc_cache_noprof+0x338
+          3 [<ffff80007c44403c>] leak_init+0x34
+          4 [<ffff800080015d9c>] do_one_initcall+0x64
+          5 [<ffff8000801a6328>] do_init_module+0x60
+          6 [<ffff8000801a878c>] load_module+0x1f54
+          7 [<ffff8000801a8bac>] init_module_from_file+0xe4
+          8 [<ffff8000801a8d90>] __arm64_sys_finit_module+0x150
+          9 [<ffff80008002d634>] invoke_syscall+0x5c
+         10 [<ffff80008002d740>] el0_svc_common.constprop.0+0x48
+         11 [<ffff80008002d80c>] do_el0_svc+0x24
+         12 [<ffff8000815000d8>] el0_svc+0x38
+         13 [<ffff800081500550>] el0t_64_sync_handler+0xa0
+         14 [<ffff8000800115a0>] el0t_64_sync+0x198
 done
 ```
 
@@ -128,10 +129,11 @@ module 'mymodule' unloaded
 
 1 stacks with outstanding allocations:
 128 bytes in 1 allocations from stack
-        addr = 0xffff00008ba60f00 size = 128
-          0 [<ffff80000834df84>] kmalloc_trace+0xf0
-          1 [<ffff80000834df84>] kmalloc_trace+0xf0
-          2 [<ffff800032f2f060>] mymodule_init+0x34
+        addr = 0xffff0000cb2c1500 size = 128
+          0 [<ffff80008038567c>] __traceiter_kmalloc+0x74
+          1 [<ffff80008038567c>] __traceiter_kmalloc+0x74
+          2 [<ffff8000803f5d68>] __kmalloc_cache_noprof+0x338
+          3 [<ffff80007c44403c>] mymodule_init+0x34
           ...
 done
 ```
@@ -164,11 +166,12 @@ For `./kmodleak`, run it in verbose mode (`-v`) to see libbpf debug logs:
 $ sudo ./kmodleak -v leak
 using page size: 4096
 libbpf: loading object 'kmodleak_bpf' from buffer
-libbpf: elf: section(2) .symtab, size 2400, link 1, flags 0, type=2
-libbpf: elf: section(3) .text, size 600, link 0, flags 6, type=1
-libbpf: sec '.text': found program 'validate_stack' at insn offset 0 (0 bytes), code size 75 insns (600 bytes)
-libbpf: elf: section(4) raw_tracepoint/module_load, size 808, link 0, flags 6, type=1
-libbpf: sec 'raw_tracepoint/module_load': found program 'kmodleak__module_load' at insn offset 0 (0 bytes), code size 101 insns (808 bytes)
+libbpf: elf: section(2) .symtab, size 2208, link 1, flags 0, type=2
+libbpf: elf: section(3) .text, size 1544, link 0, flags 6, type=1
+libbpf: sec '.text': found program 'called_from_module' at insn offset 0 (0 bytes), code size 84 insns (672 bytes)
+libbpf: sec '.text': found program 'record_alloc' at insn offset 84 (672 bytes), code size 109 insns (872 bytes)
+libbpf: elf: section(4) raw_tracepoint/module_load, size 1104, link 0, flags 6, type=1
+libbpf: sec 'raw_tracepoint/module_load': found program 'kmodleak__module_load' at insn offset 0 (0 bytes), code size 138 insns (1104 bytes)
 libbpf: elf: section(5) kretprobe/load_module, size 208, link 0, flags 6, type=1
 ...
 ```

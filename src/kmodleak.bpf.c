@@ -50,6 +50,18 @@ struct {
 	__uint(max_entries, 4096);
 } events SEC(".maps");
 
+/*
+ * Symbols for return addresses in the module's init text, resolved in the
+ * kernel while the init text is still mapped. Keyed by return address; the
+ * value is bpf_snprintf("%pS") output for the preceding byte.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, u64); /* return address */
+	__type(value, struct init_sym);
+	__uint(max_entries, INIT_SYMS_MAX_ENTRIES);
+} init_syms SEC(".maps");
+
 struct stack_trace_t {
 	long kern_stack_size;
 	u64 kern_stack[PERF_MAX_STACK_DEPTH + 1];
@@ -66,6 +78,62 @@ static __always_inline bool module_loaded(void) {
 	return module_base != 0 && module_size != 0;
 }
 
+/* ip is in the module's init text, which is only mapped until init completes */
+static __always_inline bool in_module_init(u64 ip) {
+	return !mod_initialized && module_init_base <= ip && ip < module_init_base + module_init_size;
+}
+
+static void record_init_sym(u64 ip) {
+	static const char fmt[] = "%pS";
+	struct init_sym sym;
+	u64 args[1];
+
+	if (bpf_map_lookup_elem(&init_syms, &ip))
+		return;
+
+	/*
+	 * ip is a return address. bpf_snprintf() does not support %pB, so
+	 * look up the preceding byte here and let userspace add one to the
+	 * offset, which attributes a call at the very end of a function to
+	 * that function rather than the one following it.
+	 */
+	args[0] = ip - 1;
+	if (bpf_snprintf(sym.name, sizeof(sym.name), fmt, args, sizeof(args)) < 0)
+		return;
+
+	bpf_map_update_elem(&init_syms, &ip, &sym, BPF_NOEXIST);
+}
+
+/*
+ * Resolve the init text frames of the stack captured by called_from_module().
+ * __init symbols disappear from kallsyms once the module's init function
+ * returns, so userspace cannot resolve them after the fact.
+ */
+static void record_init_syms(void) {
+	volatile long stack_size; // verifier hack
+	struct stack_trace_t *data;
+	u32 key = 0;
+
+	if (mod_initialized)
+		return;
+
+	data = bpf_map_lookup_elem(&tmp_stack_traces, &key);
+	if (!data)
+		return;
+
+	stack_size = data->kern_stack_size;
+
+	if (stack_size > PERF_MAX_STACK_DEPTH)
+		return;
+
+	for (u32 i = 0; i < (stack_size & PERF_MAX_STACK_DEPTH); i++) {
+		u64 ip = data->kern_stack[i & PERF_MAX_STACK_DEPTH];
+
+		if (in_module_init(ip))
+			record_init_sym(ip);
+	}
+}
+
 static int record_alloc(void *ctx, u64 address, size_t size) {
 	struct alloc_info info;
 
@@ -75,6 +143,7 @@ static int record_alloc(void *ctx, u64 address, size_t size) {
 	if (address != 0) {
 		info.stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
 		bpf_map_update_elem(&allocs, &address, &info, BPF_ANY);
+		record_init_syms();
 	}
 
 	if (trace_all)
@@ -117,8 +186,7 @@ static bool iterate_stack_trace(struct stack_trace_t *data) {
 			return true;
 
 		// ip is located in the module's init area (before initialization completed)
-		if (!mod_initialized && module_init_base <= ip &&
-		    ip < module_init_base + module_init_size)
+		if (in_module_init(ip))
 			return true;
 	}
 

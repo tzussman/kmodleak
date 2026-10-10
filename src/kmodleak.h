@@ -9,6 +9,13 @@
 
 #define PERF_MAX_STACK_DEPTH 127 /* /include/uapi/linux/perf_event.h */
 
+/* Symbols for return addresses in the module's init text, see record_init_syms() */
+#define INIT_SYMS_MAX_ENTRIES 1024
+
+struct init_sym {
+	char name[128]; /* bpf_snprintf("%pS") output */
+};
+
 struct alloc_info {
 	__u64 size;
 	int stack_id;
