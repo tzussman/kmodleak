@@ -58,7 +58,7 @@ struct {
 /*
  * Symbols for return addresses in the module's text, resolved in the kernel
  * while the module is loaded. Keyed by return address; the value is
- * bpf_snprintf("%pS") output for the preceding byte.
+ * bpf_snprintf("%pB") output.
  */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -106,20 +106,14 @@ static __always_inline bool in_slab_allocator(u64 ip) {
 }
 
 static void record_mod_sym(u64 ip) {
-	static const char fmt[] = "%pS";
+	static const char fmt[] = "%pB"; /* symbol for a return address */
 	struct mod_sym sym;
 	u64 args[1];
 
 	if (bpf_map_lookup_elem(&mod_syms, &ip))
 		return;
 
-	/*
-	 * ip is a return address. bpf_snprintf() does not support %pB, so
-	 * look up the preceding byte here and let userspace add one to the
-	 * offset, which attributes a call at the very end of a function to
-	 * that function rather than the one following it.
-	 */
-	args[0] = ip - 1;
+	args[0] = ip;
 	if (bpf_snprintf(sym.name, sizeof(sym.name), fmt, args, sizeof(args)) < 0)
 		return;
 

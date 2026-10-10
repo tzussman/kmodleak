@@ -140,14 +140,14 @@ int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list a
 
 /*
  * Print a frame resolved by the BPF program, see record_mod_sym(). sym is
- * bpf_snprintf("%pS") output for addr - 1: name+0xoff/0xsize [module].
+ * bpf_snprintf("%pB") output: name+0xoff/0xsize [module].
  */
 static void print_mod_sym_frame(size_t i, uint64_t addr, const struct mod_sym *sym) {
 	char name[sizeof(sym->name)];
 	unsigned long off;
 
 	if (sscanf(sym->name, "%127[^+]+0x%lx", name, &off) == 2)
-		printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, name, off + 1);
+		printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, name, off);
 	else
 		printf("\t%3zu [<%016lx>] %s\n", i, addr, sym->name);
 }

@@ -19,7 +19,7 @@
 #define MOD_SYMS_MAX_ENTRIES 4096
 
 struct mod_sym {
-	char name[128]; /* bpf_snprintf("%pS") output */
+	char name[128]; /* bpf_snprintf("%pB") output */
 };
 
 /* Kernel functions whose frames mark a page allocation as the slab allocator's */
