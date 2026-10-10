@@ -152,3 +152,18 @@ def test_kmem_cache_alloc_outstanding(kmodleak, modules):
     assert stack.count == 1
     assert stack.size >= 64
     assert any("kmem_cache_alloc" in s for s in stack.symbols())
+
+
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
+def test_signal_before_unload_reports(kmodleak, modules, sig):
+    k = kmodleak("leak")
+    k.insmod(modules.ko("leak"))
+    k.signal(sig)
+    r = k.wait_exit()
+    k.rmmod()
+
+    assert r.returncode == 0 and r.done
+    assert r.loaded and not r.unloaded
+    stacks = r.direct_stacks("leak_init")
+    assert len(stacks) == 1
+    assert stacks[0].count == 1
