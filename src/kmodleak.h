@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+
 #ifndef __KMODLEAK_H
 #define __KMODLEAK_H
 

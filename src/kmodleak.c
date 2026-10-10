@@ -1,8 +1,10 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 /*
  * kmodleak
  * Copyright (c) 2023 Tal Zussman
  *
  * Based on memleak(8) from BCC by Sasha Goldshtein, JP Kobryn, and others
+ * Copyright (c) 2023 Meta Platforms, Inc. and affiliates.
  * https://github.com/iovisor/bcc/blob/master/libbpf-tools/memleak.c
  */
 
