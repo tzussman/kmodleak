@@ -25,6 +25,7 @@ __u64 module_init_base = 0;
 __u64 module_init_size = 0;
 
 __u64 modload_pid_tgid = 0;
+bool mod_loaded = false;
 bool mod_initialized = false;
 
 struct {
@@ -75,7 +76,7 @@ struct {
 } tmp_stack_traces SEC(".maps");
 
 static __always_inline bool module_loaded(void) {
-	return module_base != 0 && module_size != 0;
+	return mod_loaded;
 }
 
 /* ip is in the module's init text, which is only mapped until init completes */
@@ -247,7 +248,7 @@ SEC("raw_tracepoint/module_load")
 int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 	struct module___x *mod = (struct module___x *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
-	struct mod_event *mod_loaded;
+	struct mod_event *ev;
 
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
@@ -258,34 +259,35 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 				&module_init_size);
 
 	modload_pid_tgid = bpf_get_current_pid_tgid();
+	mod_loaded = true;
 
-	mod_loaded = bpf_ringbuf_reserve(&events, sizeof(*mod_loaded), 0);
-	if (!mod_loaded)
+	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
+	if (!ev)
 		return 0;
 
-	mod_loaded->state = MOD_LOADED;
+	ev->state = MOD_LOADED;
 
-	bpf_ringbuf_submit(mod_loaded, 0);
+	bpf_ringbuf_submit(ev, 0);
 
 	return 0;
 }
 
 SEC("kretprobe/load_module")
 int BPF_KRETPROBE(kmodleak__kretprobe__load_module) {
-	struct mod_event *mod_init_data;
+	struct mod_event *ev;
 
 	if (mod_initialized || modload_pid_tgid != bpf_get_current_pid_tgid())
 		return 0;
 
 	mod_initialized = true;
 
-	mod_init_data = bpf_ringbuf_reserve(&events, sizeof(*mod_init_data), 0);
-	if (!mod_init_data)
+	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
+	if (!ev)
 		return 0;
 
-	mod_init_data->state = MOD_INITIALIZED;
+	ev->state = MOD_INITIALIZED;
 
-	bpf_ringbuf_submit(mod_init_data, 0);
+	bpf_ringbuf_submit(ev, 0);
 
 	return 0;
 }
@@ -294,20 +296,20 @@ SEC("raw_tracepoint/module_free")
 int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 	struct module *mod = (struct module *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
-	struct mod_event *mod_unloaded;
+	struct mod_event *ev;
 
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
 	if (strncmp_mod(modname, modtarget) != 0)
 		return 0;
 
-	mod_unloaded = bpf_ringbuf_reserve(&events, sizeof(*mod_unloaded), 0);
-	if (!mod_unloaded)
+	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
+	if (!ev)
 		return 0;
 
-	mod_unloaded->state = MOD_FREED;
+	ev->state = MOD_FREED;
 
-	bpf_ringbuf_submit(mod_unloaded, 0);
+	bpf_ringbuf_submit(ev, 0);
 
 	return 0;
 }
