@@ -88,7 +88,7 @@ struct ksyms *ksyms;
 
 static struct kmodleak_bpf *skel = NULL;
 
-static int init_syms_fd = -1;
+static int mod_syms_fd = -1;
 
 static bool mod_loaded = false;
 
@@ -139,10 +139,10 @@ int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list a
 }
 
 /*
- * Print a frame resolved by the BPF program, see record_init_sym(). sym is
+ * Print a frame resolved by the BPF program, see record_mod_sym(). sym is
  * bpf_snprintf("%pS") output for addr - 1: name+0xoff/0xsize [module].
  */
-static void print_init_sym_frame(size_t i, uint64_t addr, const struct init_sym *sym) {
+static void print_mod_sym_frame(size_t i, uint64_t addr, const struct mod_sym *sym) {
 	char name[sizeof(sym->name)];
 	unsigned long off;
 
@@ -153,7 +153,7 @@ static void print_init_sym_frame(size_t i, uint64_t addr, const struct init_sym 
 }
 
 void print_stack_frames_by_ksyms(uint64_t *stack) {
-	struct init_sym init_sym;
+	struct mod_sym mod_sym;
 	const struct ksym *ksym;
 	uint64_t addr;
 
@@ -163,8 +163,9 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 		if (addr == 0)
 			break;
 
-		if (init_syms_fd >= 0 && bpf_map_lookup_elem(init_syms_fd, &addr, &init_sym) == 0) {
-			print_init_sym_frame(i, addr, &init_sym);
+		/* Module frames were resolved by the BPF program while it was loaded */
+		if (bpf_map_lookup_elem(mod_syms_fd, &addr, &mod_sym) == 0) {
+			print_mod_sym_frame(i, addr, &mod_sym);
 			continue;
 		}
 
@@ -175,7 +176,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 		 * instruction, so look up the preceding byte to attribute it to
 		 * the caller.
 		 */
-		ksym = ksyms__map_addr(ksyms, i == 0 ? addr : addr - 1);
+		ksym = ksyms ? ksyms__map_addr(ksyms, i == 0 ? addr : addr - 1) : NULL;
 
 		/*
 		 * Print the stack frames. Give the frame index a field width of 3,
@@ -400,16 +401,6 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 
 		detach_kernel_module_load_tracepoint(skel);
 
-		/*
-		 * Module symbols are only added to kallsyms after the module is
-		 * loaded.
-		 */
-		ksyms = ksyms__load();
-		if (!ksyms) {
-			fprintf(stderr, "Failed to load ksyms\n");
-			return -1;
-		}
-
 		printf("module '%s' loaded\n", env.modname);
 	} else if (ev->state == MOD_INITIALIZED) {
 		detach_kernel_module_init_kretprobe(skel);
@@ -508,7 +499,7 @@ int main(int argc, char **argv) {
 
 	const int allocs_fd = bpf_map__fd(skel->maps.allocs);
 	const int stack_traces_fd = bpf_map__fd(skel->maps.stack_traces);
-	init_syms_fd = bpf_map__fd(skel->maps.init_syms);
+	mod_syms_fd = bpf_map__fd(skel->maps.mod_syms);
 
 	ret = kmodleak_bpf__attach(skel);
 	if (ret) {
@@ -542,6 +533,11 @@ int main(int argc, char **argv) {
 			ret = 0;
 		}
 	}
+
+	/* Kernel symbols for the report; the module's own are in mod_syms */
+	ksyms = ksyms__load();
+	if (!ksyms)
+		fprintf(stderr, "warning: failed to load kernel symbols\n");
 
 	if (print_allocs(allocs_fd, stack_traces_fd))
 		ret = 1;

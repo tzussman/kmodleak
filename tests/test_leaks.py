@@ -101,19 +101,9 @@ def check_core_text_leak(r):
 
 
 def test_leak_from_core_text(kmodleak, modules):
-    """An allocation after init, from a parameter callback in core text,
-    is attributed to the module and resolved from kallsyms."""
-    def between():
-        # Give kmodleak time to snapshot kallsyms before the module is gone
-        time.sleep(0.5)
-        write_trigger()
-
-    r = trace(kmodleak, modules, "leak_core", between=between)
-    check_core_text_leak(r)
-
-
-@pytest.mark.xfail(reason="core text symbols come from a kallsyms snapshot that races a fast unload")
-def test_leak_from_core_text_fast_unload(kmodleak, modules):
+    """An allocation after init, from a parameter callback in core text, is
+    attributed to the module and its symbol resolved even though the module
+    is unloaded again immediately."""
     r = trace(kmodleak, modules, "leak_core", between=write_trigger)
     check_core_text_leak(r)
 
