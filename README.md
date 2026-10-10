@@ -22,17 +22,17 @@ is intended to serve as a lightweight replacement for its memory leak detector.*
 
 ### Install Dependencies
 
-You will need `clang` (at least v17 or later), `libelf` and `zlib` to build
-the examples, package names may vary across distros.
+You will need `clang` (v17 or later), `gcc`, `make`, `libelf` and `zlib` to
+build `kmodleak`. Package names may vary across distros.
 
 On Ubuntu/Debian, you need:
 ```shell
-$ apt install clang libelf1 libelf-dev zlib1g-dev
+$ apt install clang gcc make libelf1 libelf-dev zlib1g-dev
 ```
 
 On CentOS/Fedora, you need:
 ```shell
-$ dnf install clang elfutils-libelf elfutils-libelf-devel zlib-devel
+$ dnf install clang gcc make elfutils-libelf elfutils-libelf-devel zlib-devel
 ```
 
 If your distribution does not offer a recent enough version of `clang`, see
@@ -47,7 +47,7 @@ $ git clone --recurse-submodules https://github.com/tzussman/kmodleak
 
 ### Building
 
-Makefile build:
+Build with `make` and run the result as root:
 
 ```console
 $ git submodule update --init --recursive       # check out libbpf
