@@ -22,8 +22,13 @@ struct mod_sym {
 	char name[128]; /* bpf_snprintf("%pB") output */
 };
 
-/* Kernel functions whose frames mark a page allocation as the slab allocator's */
-#define SLAB_RANGES_MAX 64
+/*
+ * Kernel functions whose frames mark an allocation as an allocator's own
+ * rather than the module's: page allocations under the slab allocator or
+ * vmalloc, and vmap areas under the vm_map_ram block pool.
+ */
+#define PAGE_INTERNAL_RANGES_MAX 64
+#define VMAP_INTERNAL_RANGES_MAX 8
 
 struct addr_range {
 	__u64 start;

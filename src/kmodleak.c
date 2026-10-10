@@ -391,62 +391,91 @@ void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
 }
 
 /*
- * Page allocations made by the slab allocator while serving the module's
- * kmalloc() are not the module's own, and neither are the pages behind a
- * large kmalloc(), which is traced as an object. Page allocations whose stack
- * passes through a function with one of these prefixes are left out. The
- * exact names differ between kernel versions and slab allocators, so match
- * prefixes against kallsyms and use whatever exists.
+ * Allocations an allocator makes for itself while serving the module are not
+ * the module's own: pages taken by the slab allocator, including for a large
+ * kmalloc(), or by vmalloc(), whose objects and areas are traced separately
+ * and which outlive them; and vmap areas taken for the vm_map_ram() block
+ * pool. Allocations whose stack passes through a function with one of these
+ * prefixes are left out. The exact names differ between kernel versions and
+ * slab allocators, so match prefixes against kallsyms and use whatever exists.
  */
-static const char *slab_page_func_prefixes[] = {
+static const char *page_internal_prefixes[] = {
 	"__kmalloc", "___kmalloc", "kmalloc_large", "kmalloc_order", /* kmalloc and its page-backed sizes */
 	"new_slab", "allocate_slab", "___slab_alloc", "__slab_alloc", /* SLUB slab growth */
 	"kmem_getpages", "cache_grow", /* SLAB, before 6.8 */
+	"vm_area_alloc_pages", "__vmalloc", /* pages behind a vmalloc() */
 };
 
-static bool is_slab_page_func(const char *name) {
-	for (size_t i = 0; i < sizeof(slab_page_func_prefixes) / sizeof(*slab_page_func_prefixes); i++) {
-		if (strncmp(name, slab_page_func_prefixes[i], strlen(slab_page_func_prefixes[i])) == 0)
+static const char *vmap_internal_prefixes[] = {
+	"new_vmap_block", /* vm_map_ram() block pool */
+};
+
+static bool has_prefix(const char *name, const char **prefixes, size_t n) {
+	for (size_t i = 0; i < n; i++) {
+		if (strncmp(name, prefixes[i], strlen(prefixes[i])) == 0)
 			return true;
 	}
 
 	return false;
 }
 
-static int fill_slab_ranges(struct kmodleak_bpf *skel) {
-	struct ksyms *ks = ksyms__load();
+static size_t fill_ranges(struct ksyms *ks, const char **prefixes, size_t nr_prefixes,
+			  volatile struct addr_range *ranges, size_t max) {
 	size_t n = 0;
-
-	if (!ks)
-		return -1;
 
 	/* syms are sorted by address, so a function ends where the next symbol starts */
 	for (int i = 0; i < ks->syms_sz - 1; i++) {
 		const struct ksym *sym = &ks->syms[i], *next = sym + 1;
 
-		if (!is_slab_page_func(sym->name))
+		if (!has_prefix(sym->name, prefixes, nr_prefixes))
 			continue;
 
 		while (next < ks->syms + ks->syms_sz - 1 && next->addr == sym->addr)
 			next++;
 
-		if (n == SLAB_RANGES_MAX) {
-			fprintf(stderr, "warning: too many slab allocator symbols, ignoring %s\n", sym->name);
+		if (n == max) {
+			fprintf(stderr, "warning: too many allocator symbols, ignoring %s\n", sym->name);
 			continue;
 		}
 
-		skel->rodata->slab_ranges[n].start = sym->addr;
-		skel->rodata->slab_ranges[n].end = next->addr;
+		ranges[n].start = sym->addr;
+		ranges[n].end = next->addr;
 		n++;
 	}
 
-	skel->rodata->nr_slab_ranges = n;
+	return n;
+}
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
+
+static int fill_internal_ranges(struct kmodleak_bpf *skel) {
+	struct ksyms *ks = ksyms__load();
+
+	if (!ks)
+		return -1;
+
+	skel->rodata->nr_page_internal_ranges =
+		fill_ranges(ks, page_internal_prefixes, ARRAY_SIZE(page_internal_prefixes),
+			    skel->rodata->page_internal_ranges, PAGE_INTERNAL_RANGES_MAX);
+	skel->rodata->nr_vmap_internal_ranges =
+		fill_ranges(ks, vmap_internal_prefixes, ARRAY_SIZE(vmap_internal_prefixes),
+			    skel->rodata->vmap_internal_ranges, VMAP_INTERNAL_RANGES_MAX);
 	ksyms__free(ks);
 
-	if (n == 0)
+	if (skel->rodata->nr_page_internal_ranges == 0)
 		fprintf(stderr, "warning: no slab allocator symbols found; slab pages will be attributed to the module\n");
 
 	return 0;
+}
+
+bool has_kernel_vmalloc_tracepoints(void) {
+	return tracepoint_exists("vmalloc", "alloc_vmap_area") &&
+	       tracepoint_exists("vmalloc", "free_vmap_area_noflush");
+}
+
+void disable_kernel_vmalloc_tracepoints(struct kmodleak_bpf *skel) {
+	bpf_program__set_autoload(skel->progs.kmodleak__alloc_vmap_area, false);
+	bpf_program__set_autoload(skel->progs.kmodleak__free_vmap_area_noflush, false);
 }
 
 int handle_event(void *ctx, void *data, size_t data_sz) {
@@ -549,7 +578,7 @@ int main(int argc, char **argv) {
 	skel->rodata->page_size = env.page_size;
 	skel->rodata->max_stack_depth = env.max_stack_depth;
 
-	if (fill_slab_ranges(skel)) {
+	if (fill_internal_ranges(skel)) {
 		fprintf(stderr, "failed to load kernel symbols\n");
 		ret = 1;
 
@@ -568,6 +597,10 @@ int main(int argc, char **argv) {
 
 	if (!env.percpu)
 		disable_kernel_percpu_tracepoints(skel);
+
+	/* vmalloc tracepoints exist since Linux 6.2 */
+	if (!has_kernel_vmalloc_tracepoints())
+		disable_kernel_vmalloc_tracepoints(skel);
 
 	ret = kmodleak_bpf__load(skel);
 	if (ret) {

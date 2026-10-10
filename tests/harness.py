@@ -39,7 +39,7 @@ class Frame:
 
 # Frames that belong to the allocator or tracepoint machinery rather than to
 # a caller: anything between an allocation and the function that made it.
-_ALLOCATOR = re.compile(r"alloc|free_pages|^(__traceiter_|trace_|perf_trace_)")
+_ALLOCATOR = re.compile(r"alloc|free_pages|vm_area|vmap|^(__traceiter_|trace_|perf_trace_)")
 
 
 @dataclass

@@ -19,8 +19,10 @@ const volatile size_t page_size = 4096;
 const volatile char modtarget[MODULE_NAME_LEN] = "";
 const volatile bool trace_all = false;
 const volatile __u32 max_stack_depth = DEFAULT_MAX_STACK_DEPTH;
-const volatile struct addr_range slab_ranges[SLAB_RANGES_MAX];
-const volatile __u32 nr_slab_ranges = 0;
+const volatile struct addr_range page_internal_ranges[PAGE_INTERNAL_RANGES_MAX];
+const volatile __u32 nr_page_internal_ranges = 0;
+const volatile struct addr_range vmap_internal_ranges[VMAP_INTERNAL_RANGES_MAX];
+const volatile __u32 nr_vmap_internal_ranges = 0;
 
 __u64 module_base = 0;
 __u64 module_size = 0;
@@ -100,12 +102,29 @@ static __always_inline bool in_module(u64 ip) {
 	return (module_base <= ip && ip < module_base + module_size) || in_module_init(ip);
 }
 
-/* ip is in a slab allocator function that allocates pages, see slab_ranges */
-static __always_inline bool in_slab_allocator(u64 ip) {
-	for (u32 i = 0; i < SLAB_RANGES_MAX; i++) {
-		if (i >= nr_slab_ranges)
+/* Which allocator internals to look for on the stack, see *_internal_ranges */
+enum check_internal {
+	CHECK_NONE,
+	CHECK_PAGE, /* a page allocation: slab allocator or vmalloc taking pages */
+	CHECK_VMAP, /* a vmap area: the vm_map_ram block pool */
+};
+
+static __always_inline bool in_page_internal(u64 ip) {
+	for (u32 i = 0; i < PAGE_INTERNAL_RANGES_MAX; i++) {
+		if (i >= nr_page_internal_ranges)
 			break;
-		if (slab_ranges[i].start <= ip && ip < slab_ranges[i].end)
+		if (page_internal_ranges[i].start <= ip && ip < page_internal_ranges[i].end)
+			return true;
+	}
+
+	return false;
+}
+
+static __always_inline bool in_vmap_internal(u64 ip) {
+	for (u32 i = 0; i < VMAP_INTERNAL_RANGES_MAX; i++) {
+		if (i >= nr_vmap_internal_ranges)
+			break;
+		if (vmap_internal_ranges[i].start <= ip && ip < vmap_internal_ranges[i].end)
 			return true;
 	}
 
@@ -138,9 +157,9 @@ static void record_mod_sym(u64 ip) {
 struct walk_ctx {
 	struct stack_trace_t *data;
 	u64 hash; /* FNV-1a over the frames */
-	bool check_slab; /* note frames in the slab allocator, for page allocations */
+	enum check_internal check;
 	bool found;
-	bool via_slab;
+	bool via_internal;
 };
 
 /* vmlinux.h carries no errno values, and the libc header is not for the BPF target */
@@ -163,8 +182,10 @@ static long walk_frame(u64 i, void *ctx) {
 	if (in_module(ip)) {
 		walk->found = true;
 		record_mod_sym(ip);
-	} else if (walk->check_slab && in_slab_allocator(ip)) {
-		walk->via_slab = true;
+	} else if (walk->check == CHECK_PAGE && in_page_internal(ip)) {
+		walk->via_internal = true;
+	} else if (walk->check == CHECK_VMAP && in_vmap_internal(ip)) {
+		walk->via_internal = true;
 	}
 
 	return 0;
@@ -205,12 +226,13 @@ static int record_free(const void *address) {
  * Checks if the callsite passed through the specified module's text sections,
  * and if so keeps its stack trace and returns the hash that identifies it in
  * *stack_hash, or 0 if the stack could not be kept.
- * Page allocations the slab allocator makes while serving the module are not
- * counted: the object is accounted through the kmem tracepoints, and the page
- * stays with the slab cache after the object is freed.
+ * Allocations an allocator makes for itself while serving the module are not
+ * counted: pages taken by the slab allocator or vmalloc, whose objects and
+ * areas are accounted separately and which outlive them, and vmap areas
+ * taken for the vm_map_ram block pool.
  */
-static bool called_from_module(void *ctx, bool page_alloc, u64 *stack_hash) {
-	struct walk_ctx walk = { .hash = FNV_OFFSET_BASIS, .check_slab = page_alloc };
+static bool called_from_module(void *ctx, enum check_internal check, u64 *stack_hash) {
+	struct walk_ctx walk = { .hash = FNV_OFFSET_BASIS, .check = check };
 	struct stack_trace_t *data;
 	long stack_bytes;
 	u32 key = 0;
@@ -238,7 +260,7 @@ static bool called_from_module(void *ctx, bool page_alloc, u64 *stack_hash) {
 	walk.data = data;
 	bpf_loop(data->kern_stack_size, walk_frame, &walk, 0);
 
-	if (!walk.found || walk.via_slab)
+	if (!walk.found || walk.via_internal)
 		return false;
 
 	/* Fold in the frame count so that a stack and a longer one it is a prefix of differ */
@@ -333,7 +355,7 @@ int kmodleak__kmalloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (!called_from_module(ctx, false, &stack_hash))
+	if (!called_from_module(ctx, CHECK_NONE, &stack_hash))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -358,7 +380,7 @@ int kmodleak__kmalloc_node(void *ctx) {
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (!called_from_module(ctx, false, &stack_hash))
+		if (!called_from_module(ctx, CHECK_NONE, &stack_hash))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -395,7 +417,7 @@ int kmodleak__kmem_cache_alloc(void *ctx) {
 	const void *ptr;
 	size_t bytes_alloc;
 
-	if (!called_from_module(ctx, false, &stack_hash))
+	if (!called_from_module(ctx, CHECK_NONE, &stack_hash))
 		return 0;
 
 	if (has_kmem_alloc()) {
@@ -420,7 +442,7 @@ int kmodleak__kmem_cache_alloc_node(void *ctx) {
 	if (has_kmem_alloc_node()) {
 		struct trace_event_raw_kmem_alloc_node___x *args = ctx;
 
-		if (!called_from_module(ctx, false, &stack_hash))
+		if (!called_from_module(ctx, CHECK_NONE, &stack_hash))
 			return 0;
 
 		ptr = BPF_CORE_READ(args, ptr);
@@ -454,7 +476,7 @@ int kmodleak__kmem_cache_free(void *ctx) {
 SEC("tracepoint/kmem/mm_page_alloc")
 int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx) {
 	u64 stack_hash;
-	if (!called_from_module(ctx, true, &stack_hash))
+	if (!called_from_module(ctx, CHECK_PAGE, &stack_hash))
 		return 0;
 
 	return record_alloc(ctx->pfn, page_size << ctx->order, stack_hash);
@@ -468,10 +490,31 @@ int kmodleak__mm_page_free(struct trace_event_raw_mm_page_free *ctx) {
 	return record_free((void *)ctx->pfn);
 }
 
+SEC("tracepoint/vmalloc/alloc_vmap_area")
+int kmodleak__alloc_vmap_area(struct trace_event_raw_alloc_vmap_area *ctx) {
+	u64 stack_hash;
+
+	if (ctx->failed)
+		return 0;
+
+	if (!called_from_module(ctx, CHECK_VMAP, &stack_hash))
+		return 0;
+
+	return record_alloc(ctx->addr, ctx->size, stack_hash);
+}
+
+SEC("tracepoint/vmalloc/free_vmap_area_noflush")
+int kmodleak__free_vmap_area_noflush(struct trace_event_raw_free_vmap_area_noflush *ctx) {
+	if (!module_loaded())
+		return 0;
+
+	return record_free((void *)ctx->va_start);
+}
+
 SEC("tracepoint/percpu/percpu_alloc_percpu")
 int kmodleak__percpu_alloc_percpu(struct trace_event_raw_percpu_alloc_percpu *ctx) {
 	u64 stack_hash;
-	if (!called_from_module(ctx, false, &stack_hash))
+	if (!called_from_module(ctx, CHECK_NONE, &stack_hash))
 		return 0;
 
 	return record_alloc((u64)(ctx->ptr), ctx->bytes_alloc, stack_hash);
