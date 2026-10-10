@@ -193,3 +193,15 @@ def test_longest_module_name(kmodleak, modules):
     r = trace(kmodleak, modules, LONG_NAME)
 
     assert len(r.direct_stacks("longname_init")) == 1
+
+
+@pytest.mark.xfail(reason="dashes in module names are not normalised to underscores yet")
+def test_dash_in_module_name(kmodleak, modules):
+    """insmod leak-dash.ko loads a module named leak_dash."""
+    k = kmodleak("leak-dash", timeout=10)
+    k.insmod(modules.ko("leak-dash"))
+    k.rmmod("leak_dash")
+    r = k.wait_exit()
+
+    assert r.loaded and r.unloaded
+    assert len(r.direct_stacks("leak_dash_init")) == 1
