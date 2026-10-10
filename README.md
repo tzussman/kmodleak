@@ -138,8 +138,13 @@ module 'mymodule' unloaded
 done
 ```
 
-The repository includes a couple sample modules for testing under the `mod`
-directory.
+The repository includes a test suite under `tests`, with sample modules under
+`tests/modules`. It needs `pytest` and the running kernel's headers, and must
+run as root since it loads modules:
+
+```shell
+$ sudo python3 -m pytest tests
+```
 
 ### Installation
 

@@ -61,13 +61,11 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libelf-dev zlib1g-dev linux-headers-$(uname -r)
+        sudo apt-get install -y libelf-dev zlib1g-dev python3-pytest linux-headers-$(uname -r)
     - name: Build kmodleak
       run: make -C src -j$(nproc) CLANG=clang-23
-    - name: Build test modules
-      run: make -C mod
-    - name: Run module tests
-      run: cd mod && ./test.sh
+    - name: Run tests
+      run: sudo python3 -m pytest -v tests
     - name: Show kernel log
       if: failure()
       run: sudo dmesg | tail -n 50
