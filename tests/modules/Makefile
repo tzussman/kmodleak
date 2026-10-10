@@ -6,6 +6,7 @@ obj-m += leak_core.o
 obj-m += leak_work.o
 obj-m += noleak_xctx.o
 obj-m += cache_alloc.o
+obj-m += leak_initfail.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
