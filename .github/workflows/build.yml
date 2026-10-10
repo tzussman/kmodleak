@@ -47,3 +47,27 @@ jobs:
           build_container \
           /bin/bash -c \
           'cd /kmodleak/src && make -j`nproc`'
+
+  # Loading modules and attaching BPF programs needs the runner's own kernel,
+  # so this runs on the host rather than in a container.
+  test_modules:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+    - name: Install LLVM 23
+      run: wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 23
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libelf-dev zlib1g-dev linux-headers-$(uname -r)
+    - name: Build kmodleak
+      run: make -C src -j$(nproc) CLANG=clang-23
+    - name: Build test modules
+      run: make -C mod
+    - name: Run module tests
+      run: cd mod && ./test.sh
+    - name: Show kernel log
+      if: failure()
+      run: sudo dmesg | tail -n 50
