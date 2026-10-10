@@ -138,8 +138,8 @@ module 'mymodule' unloaded
 done
 ```
 
-The repository includes a couple sample modules for testing under the `mod`
-directory.
+The repository includes a couple sample modules for testing under the
+`tests/modules` directory.
 
 ### Installation
 

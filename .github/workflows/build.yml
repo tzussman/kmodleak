@@ -65,9 +65,9 @@ jobs:
     - name: Build kmodleak
       run: make -C src -j$(nproc) CLANG=clang-23
     - name: Build test modules
-      run: make -C mod
+      run: make -C tests/modules
     - name: Run module tests
-      run: cd mod && ./test.sh
+      run: cd tests/modules && ./test.sh
     - name: Show kernel log
       if: failure()
       run: sudo dmesg | tail -n 50
