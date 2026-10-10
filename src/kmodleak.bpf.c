@@ -164,7 +164,7 @@ SEC("raw_tracepoint/module_load")
 int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 	struct module___x *mod = (struct module___x *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
-	struct data_t *mod_loaded;
+	struct mod_event *mod_loaded;
 
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
@@ -180,7 +180,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 	if (!mod_loaded)
 		return 0;
 
-	mod_loaded->val = MOD_LOADED;
+	mod_loaded->state = MOD_LOADED;
 
 	bpf_ringbuf_submit(mod_loaded, 0);
 
@@ -189,7 +189,7 @@ int kmodleak__module_load(struct bpf_raw_tracepoint_args *ctx) {
 
 SEC("kretprobe/load_module")
 int BPF_KRETPROBE(kmodleak__kretprobe__load_module) {
-	struct data_t *mod_init_data;
+	struct mod_event *mod_init_data;
 
 	if (mod_initialized || modload_pid_tgid != bpf_get_current_pid_tgid())
 		return 0;
@@ -200,7 +200,7 @@ int BPF_KRETPROBE(kmodleak__kretprobe__load_module) {
 	if (!mod_init_data)
 		return 0;
 
-	mod_init_data->val = MOD_INITIALIZED;
+	mod_init_data->state = MOD_INITIALIZED;
 
 	bpf_ringbuf_submit(mod_init_data, 0);
 
@@ -211,7 +211,7 @@ SEC("raw_tracepoint/module_free")
 int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 	struct module *mod = (struct module *)BPF_CORE_READ(ctx, args[0]);
 	char modname[MODULE_NAME_LEN];
-	struct data_t *mod_unloaded;
+	struct mod_event *mod_unloaded;
 
 	bpf_probe_read_kernel_str(modname, sizeof(modname), &mod->name);
 
@@ -222,7 +222,7 @@ int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 	if (!mod_unloaded)
 		return 0;
 
-	mod_unloaded->val = MOD_FREED;
+	mod_unloaded->state = MOD_FREED;
 
 	bpf_ringbuf_submit(mod_unloaded, 0);
 

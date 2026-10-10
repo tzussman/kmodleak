@@ -20,8 +20,8 @@ enum modstate_t {
 	MOD_FREED = 3,
 };
 
-struct data_t {
-	__u32 val;
+struct mod_event {
+	__u32 state; /* enum modstate_t */
 };
 
 #endif /* __KMODLEAK_H */

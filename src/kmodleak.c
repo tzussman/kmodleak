@@ -357,9 +357,9 @@ void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
 }
 
 int handle_event(void *ctx, void *data, size_t data_sz) {
-	const struct data_t *d = data;
+	const struct mod_event *ev = data;
 
-	if (d->val == MOD_LOADED) {
+	if (ev->state == MOD_LOADED) {
 		mod_loaded = true;
 
 		detach_kernel_module_load_tracepoint(skel);
@@ -375,9 +375,9 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 		}
 
 		printf("module '%s' loaded\n", env.modname);
-	} else if (d->val == MOD_INITIALIZED) {
+	} else if (ev->state == MOD_INITIALIZED) {
 		detach_kernel_module_init_kretprobe(skel);
-	} else if (d->val == MOD_FREED) {
+	} else if (ev->state == MOD_FREED) {
 		if (!mod_loaded) {
 			fprintf(stderr, "error: module '%s' freed before loaded\n", env.modname);
 			return -1;
