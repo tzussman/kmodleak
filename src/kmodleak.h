@@ -3,9 +3,7 @@
 
 #define ALLOCS_MAX_ENTRIES 1000000
 
-#ifndef MODULE_NAME_LEN
 #define MODULE_NAME_LEN 56 /* /include/linux/module.h */
-#endif
 
 #define PERF_MAX_STACK_DEPTH 127 /* /include/uapi/linux/perf_event.h */
 
