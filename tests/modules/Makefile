@@ -1,4 +1,5 @@
 obj-m += leak.o noleak.o
+obj-m += leak_multi.o
 
 KDIR ?= /lib/modules/$(shell uname -r)/build
 

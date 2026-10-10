@@ -42,3 +42,16 @@ def test_leak(kmodleak, modules):
 def test_noleak(kmodleak, modules):
     r = trace(kmodleak, modules, "noleak")
     assert r.outstanding == 0
+
+
+def test_multiple_allocations_aggregate(kmodleak, modules):
+    """Allocations from one call site are reported as one stack."""
+    r = trace(kmodleak, modules, "leak_multi", params=("nr_allocs=10",))
+
+    stacks = r.direct_stacks("leak_multi_init")
+    assert len(stacks) == 1
+    stack = stacks[0]
+    assert stack.count == 10
+    assert len(stack.allocations) == 10
+    assert stack.size == sum(size for _, size in stack.allocations)
+    assert stack.size >= 10 * 64
