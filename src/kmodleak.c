@@ -1,6 +1,6 @@
-/* 
+/*
  * kmodleak
- * Copyright (c) 2023 Tal Zussman 
+ * Copyright (c) 2023 Tal Zussman
  *
  * Based on memleak(8) from BCC by Sasha Goldshtein, JP Kobryn, and others
  * https://github.com/iovisor/bcc/blob/master/libbpf-tools/memleak.c
