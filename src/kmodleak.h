@@ -7,7 +7,13 @@
 
 #define MODULE_NAME_LEN 56 /* /include/linux/module.h */
 
-#define PERF_MAX_STACK_DEPTH 127 /* /include/uapi/linux/perf_event.h */
+/*
+ * Stack depth: kernel.perf_event_max_stack decides, with this as the fallback
+ * and a cap set by the 32 KB limit on per-CPU map values, which hold the
+ * stack buffer: one long for the frame count plus one u64 per frame.
+ */
+#define DEFAULT_MAX_STACK_DEPTH 127
+#define MAX_STACK_DEPTH_LIMIT ((32 * 1024 - 8) / 8)
 
 /* Symbols for return addresses in the module's text, see record_mod_syms() */
 #define MOD_SYMS_MAX_ENTRIES 4096

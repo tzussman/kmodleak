@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Leak detection on the sample modules."""
 
+import errno
 import os
 import signal
 import subprocess
@@ -157,6 +158,50 @@ def test_other_modules_are_ignored(kmodleak, modules):
     assert r.returncode == 0 and r.done
     assert r.loaded and r.unloaded
     assert r.outstanding == 0
+
+
+PERF_EVENT_MAX_STACK = Path("/proc/sys/kernel/perf_event_max_stack")
+
+
+def write_perf_event_max_stack(value, retries=40):
+    """The kernel refuses the change while anything holds a callchain buffer,
+    which includes a stack map that is still being freed after kmodleak
+    exited, so retry for a few seconds."""
+    for attempt in range(retries):
+        try:
+            PERF_EVENT_MAX_STACK.write_text(str(value))
+            return
+        except OSError as e:
+            if e.errno != errno.EBUSY or attempt == retries - 1:
+                raise
+            time.sleep(0.1)
+
+
+@pytest.fixture
+def perf_event_max_stack():
+    """Set kernel.perf_event_max_stack for a test and restore it afterwards."""
+    saved = PERF_EVENT_MAX_STACK.read_text()
+
+    def set_depth(depth):
+        try:
+            write_perf_event_max_stack(depth)
+        except OSError as e:
+            pytest.skip(f"cannot set kernel.perf_event_max_stack: {e}")
+
+    yield set_depth
+    write_perf_event_max_stack(saved)
+
+
+@pytest.mark.parametrize("depth", [16, 4095])
+def test_stack_depth_follows_sysctl(kmodleak, modules, perf_event_max_stack, depth):
+    """The stack depth is sized from kernel.perf_event_max_stack, up to the
+    most the per-CPU stack buffer can hold."""
+    perf_event_max_stack(depth)
+    r = trace(kmodleak, modules, "leak")
+
+    stacks = r.direct_stacks("leak_init")
+    assert len(stacks) == 1
+    assert max(f.index for f in stacks[0].frames) < depth
 
 
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])

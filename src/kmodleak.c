@@ -29,7 +29,7 @@
 static struct env {
 	bool trace_all;
 	bool percpu;
-	int perf_max_stack_depth;
+	int max_stack_depth;
 	int stack_map_max_entries;
 	long page_size;
 	bool verbose;
@@ -37,7 +37,7 @@ static struct env {
 } env = {
 	.trace_all = false, // -t --trace
 	.percpu = false, // --percpu
-	.perf_max_stack_depth = PERF_MAX_STACK_DEPTH,
+	.max_stack_depth = DEFAULT_MAX_STACK_DEPTH, // overridden by kernel.perf_event_max_stack
 	.stack_map_max_entries = 10240,
 	.page_size = 1,
 	.verbose = false,
@@ -157,7 +157,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 	const struct ksym *ksym;
 	uint64_t addr;
 
-	for (size_t i = 0; i < env.perf_max_stack_depth; ++i) {
+	for (size_t i = 0; i < env.max_stack_depth; ++i) {
 		addr = stack[i];
 
 		if (addr == 0)
@@ -193,7 +193,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_traces_fd) {
 	int ret = 0;
 
-	uint64_t *stack = calloc(env.perf_max_stack_depth, sizeof(*stack));
+	uint64_t *stack = calloc(env.max_stack_depth, sizeof(*stack));
 	if (!stack) {
 		perror("failed to allocate stack array");
 		return -ENOMEM;
@@ -421,6 +421,7 @@ int main(int argc, char **argv) {
 	int ret = 0;
 	struct ring_buffer *events = NULL;
 	struct sigaction sa;
+	int max_stack;
 
 	static const struct argp argp = {
 		.options = argp_options,
@@ -455,6 +456,19 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	/*
+	 * The kernel caps stack traces at kernel.perf_event_max_stack and refuses
+	 * a stack map deeper than that, so size everything from it.
+	 */
+	max_stack = read_perf_event_max_stack();
+	if (max_stack < 1)
+		fprintf(stderr, "warning: cannot read kernel.perf_event_max_stack, assuming %d\n",
+			env.max_stack_depth);
+	else if (max_stack > MAX_STACK_DEPTH_LIMIT)
+		env.max_stack_depth = MAX_STACK_DEPTH_LIMIT;
+	else
+		env.max_stack_depth = max_stack;
+
 	// Check if module is already loaded
 	if (is_kernel_module(env.modname)) {
 		fprintf(stderr, "module '%s' is already loaded. Please unload and try again.\n",
@@ -477,10 +491,13 @@ int main(int argc, char **argv) {
 
 	skel->rodata->trace_all = env.trace_all;
 	skel->rodata->page_size = env.page_size;
+	skel->rodata->max_stack_depth = env.max_stack_depth;
 	memcpy(skel->rodata->modtarget, env.modname, sizeof(env.modname));
 
 	bpf_map__set_value_size(skel->maps.stack_traces,
-				env.perf_max_stack_depth * sizeof(unsigned long));
+				env.max_stack_depth * sizeof(unsigned long));
+	bpf_map__set_value_size(skel->maps.tmp_stack_traces,
+				sizeof(long) + env.max_stack_depth * sizeof(uint64_t));
 	bpf_map__set_max_entries(skel->maps.stack_traces, env.stack_map_max_entries);
 
 	// Disable kernel tracepoints based on settings or availability

@@ -18,6 +18,7 @@
 const volatile size_t page_size = 4096;
 const volatile char modtarget[MODULE_NAME_LEN] = "";
 const volatile bool trace_all = false;
+const volatile __u32 max_stack_depth = DEFAULT_MAX_STACK_DEPTH;
 
 __u64 module_base = 0;
 __u64 module_size = 0;
@@ -65,13 +66,13 @@ struct {
 
 struct stack_trace_t {
 	long kern_stack_size;
-	u64 kern_stack[PERF_MAX_STACK_DEPTH + 1];
+	u64 kern_stack[]; /* max_stack_depth entries, sized by userspace */
 };
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(key_size, sizeof(u32));
-	__uint(value_size, sizeof(struct stack_trace_t));
+	__uint(value_size, sizeof(struct stack_trace_t) + DEFAULT_MAX_STACK_DEPTH * sizeof(u64));
 	__uint(max_entries, 1);
 } tmp_stack_traces SEC(".maps");
 
@@ -111,31 +112,33 @@ static void record_mod_sym(u64 ip) {
 }
 
 /*
- * Resolve the module frames of the stack captured by called_from_module().
- * The module's symbols disappear from kallsyms when it is unloaded, and its
- * __init symbols as soon as its init function returns, so userspace cannot
+ * One frame of the stack captured by called_from_module(), run from
+ * bpf_loop() so that the verifier checks it once rather than per frame.
+ * Module frames are resolved while the module is loaded: the module's
+ * symbols disappear from kallsyms when it is unloaded, and its __init
+ * symbols as soon as its init function returns, so userspace cannot
  * reliably resolve them after the fact.
  */
-static void record_mod_syms(void) {
-	volatile long stack_size; // verifier hack
+struct walk_ctx {
 	struct stack_trace_t *data;
-	u32 key = 0;
+	bool found;
+};
 
-	data = bpf_map_lookup_elem(&tmp_stack_traces, &key);
-	if (!data)
-		return;
+static long walk_frame(u64 i, void *ctx) {
+	struct walk_ctx *walk = ctx;
+	u64 ip;
 
-	stack_size = data->kern_stack_size;
+	/* max_stack_depth is read-only data, so the verifier knows the bound */
+	if (i >= max_stack_depth || i >= MAX_STACK_DEPTH_LIMIT)
+		return 1;
 
-	if (stack_size > PERF_MAX_STACK_DEPTH)
-		return;
-
-	for (u32 i = 0; i < (stack_size & PERF_MAX_STACK_DEPTH); i++) {
-		u64 ip = data->kern_stack[i & PERF_MAX_STACK_DEPTH];
-
-		if (in_module(ip))
-			record_mod_sym(ip);
+	ip = walk->data->kern_stack[i];
+	if (in_module(ip)) {
+		walk->found = true;
+		record_mod_sym(ip);
 	}
+
+	return 0;
 }
 
 static int record_alloc(void *ctx, u64 address, size_t size) {
@@ -147,7 +150,6 @@ static int record_alloc(void *ctx, u64 address, size_t size) {
 	if (address != 0) {
 		info.stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
 		bpf_map_update_elem(&allocs, &address, &info, BPF_ANY);
-		record_mod_syms();
 	}
 
 	if (trace_all)
@@ -171,29 +173,11 @@ static int record_free(const void *address) {
 	return 0;
 }
 
-static bool iterate_stack_trace(struct stack_trace_t *data) {
-	volatile long stack_size; // verifier hack
-
-	if (!data)
-		return false;
-
-	stack_size = data->kern_stack_size;
-
-	if (stack_size > PERF_MAX_STACK_DEPTH)
-		return false;
-
-	for (u32 i = 0; i < (stack_size & PERF_MAX_STACK_DEPTH); i++) {
-		if (in_module(data->kern_stack[i & PERF_MAX_STACK_DEPTH]))
-			return true;
-	}
-
-	return false;
-}
-
 /*
  * Checks if the callsite passed through the specified module's text sections.
  */
 static bool called_from_module(void *ctx) {
+	struct walk_ctx walk = { .found = false };
 	struct stack_trace_t *data;
 	long stack_bytes;
 	u32 key = 0;
@@ -205,8 +189,7 @@ static bool called_from_module(void *ctx) {
 	if (!data)
 		return false;
 
-	stack_bytes = bpf_get_stack(ctx, data->kern_stack,
-				    PERF_MAX_STACK_DEPTH * sizeof(*data->kern_stack), 0);
+	stack_bytes = bpf_get_stack(ctx, data->kern_stack, max_stack_depth * sizeof(*data->kern_stack), 0);
 	if (stack_bytes < 0) {
 		bpf_printk("bpf_get_stack() failed: %ld\n", stack_bytes);
 		return false;
@@ -215,10 +198,10 @@ static bool called_from_module(void *ctx) {
 	// bpf_get_stack() returns number of bytes available, divide by array type size
 	data->kern_stack_size = stack_bytes / sizeof(*data->kern_stack);
 
-	if (!iterate_stack_trace(data))
-		return false;
+	walk.data = data;
+	bpf_loop(data->kern_stack_size, walk_frame, &walk, 0);
 
-	return true;
+	return walk.found;
 }
 
 /*
