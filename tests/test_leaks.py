@@ -154,6 +154,21 @@ def test_kmem_cache_alloc_outstanding(kmodleak, modules):
     assert any("kmem_cache_alloc" in s for s in stack.symbols())
 
 
+def test_other_modules_are_ignored(kmodleak, modules):
+    """Allocations by a module other than the traced one are not reported,
+    even while the traced module is loaded."""
+    k = kmodleak("noleak")
+    k.insmod(modules.ko("noleak"))
+    k.insmod(modules.ko("leak"))
+    k.rmmod("noleak")
+    r = k.wait_exit()
+    k.rmmod("leak")
+
+    assert r.returncode == 0 and r.done
+    assert r.loaded and r.unloaded
+    assert r.outstanding == 0
+
+
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
 def test_signal_before_unload_reports(kmodleak, modules, sig):
     k = kmodleak("leak")
