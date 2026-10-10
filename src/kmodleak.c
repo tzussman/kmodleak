@@ -384,6 +384,9 @@ int main(int argc, char **argv) {
 		.doc = argp_args_doc,
 	};
 
+	// Make progress messages visible as they happen when redirected to a file
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	// Parse command line args to env settings
 	if (argp_parse(&argp, argc, argv, 0, NULL, NULL)) {
 		fprintf(stderr, "failed to parse args\n");
