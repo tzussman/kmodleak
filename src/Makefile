@@ -20,6 +20,8 @@ VMLINUX := ../vmlinux.h/include/$(ARCH)/vmlinux.h
 INCLUDES := -I$(OUTPUT) -I../libbpf/include/uapi -isystem $(dir $(VMLINUX))
 CFLAGS := -g -Wall
 ALL_LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
 
 APPS = kmodleak
 
@@ -62,6 +64,16 @@ all: $(APPS)
 clean:
 	$(call msg,CLEAN)
 	$(Q)rm -rf $(OUTPUT) $(APPS)
+
+.PHONY: install
+install: $(APPS)
+	$(call msg,INSTALL,$(DESTDIR)$(BINDIR)/$(APPS))
+	$(Q)install -D -m 0755 -t $(DESTDIR)$(BINDIR) $(APPS)
+
+.PHONY: uninstall
+uninstall:
+	$(call msg,UNINSTALL,$(DESTDIR)$(BINDIR)/$(APPS))
+	$(Q)rm -f $(addprefix $(DESTDIR)$(BINDIR)/,$(APPS))
 
 $(OUTPUT) $(OUTPUT)/libbpf $(BPFTOOL_OUTPUT):
 	$(call msg,MKDIR,$@)
