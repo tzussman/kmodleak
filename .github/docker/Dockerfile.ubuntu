@@ -1,29 +1,28 @@
-ARG VERSION="22.04"
+ARG VERSION="24.04"
 FROM ubuntu:${VERSION}
 
-ARG LLVM_VERSION="14"
+ARG LLVM_VERSION="18"
 ENV LLVM_VERSION=$LLVM_VERSION
 
-ARG SHORTNAME="jammy"
+ARG SHORTNAME="noble"
 ENV SHORTNAME=$SHORTNAME
-
-RUN apt-get update && apt-get install -y curl gnupg
-RUN if [ "${LLVM_VERSION}" = "23" ]; \
-    then \
-        echo "\n\
-deb http://apt.llvm.org/${SHORTNAME}/ llvm-toolchain-${SHORTNAME} main\n\
-deb-src http://apt.llvm.org/${SHORTNAME}/ llvm-toolchain-${SHORTNAME} main\n\
-"  >> /etc/apt/sources.list;\
-    else \
-        echo "\n\
-deb http://apt.llvm.org/${SHORTNAME}/ llvm-toolchain-${SHORTNAME}-${LLVM_VERSION} main\n\
-deb-src http://apt.llvm.org/${SHORTNAME}/ llvm-toolchain-${SHORTNAME}-${LLVM_VERSION} main\n\
-"  >> /etc/apt/sources.list; \
-    fi
-RUN curl -L https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
 
 ARG DEBIAN_FRONTEND="noninteractive"
 ENV TZ="Etc/UTC"
+
+RUN apt-get update && apt-get install -y ca-certificates curl gnupg
+
+# The current development version is only available from the snapshot suite.
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+      | gpg --dearmor -o /etc/apt/keyrings/llvm.gpg && \
+    if [ "${LLVM_VERSION}" = "24" ]; then \
+        SUITE="llvm-toolchain-${SHORTNAME}"; \
+    else \
+        SUITE="llvm-toolchain-${SHORTNAME}-${LLVM_VERSION}"; \
+    fi && \
+    echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/${SHORTNAME}/ ${SUITE} main" \
+      > /etc/apt/sources.list.d/llvm.list
 
 RUN apt-get update && apt-get install -y \
       libelf-dev \
@@ -33,11 +32,9 @@ RUN apt-get update && apt-get install -y \
       clang-${LLVM_VERSION} \
       libclang-${LLVM_VERSION}-dev \
       libclang-common-${LLVM_VERSION}-dev \
-      libclang1-${LLVM_VERSION} \
       llvm-${LLVM_VERSION} \
       llvm-${LLVM_VERSION}-dev \
       llvm-${LLVM_VERSION}-runtime \
-      libllvm${LLVM_VERSION} \
       make pkg-config \
       sudo \
       && apt-get -y clean
