@@ -254,6 +254,7 @@ static int record_free(const void *address) {
  * taken for the vm_map_ram block pool.
  */
 static bool called_from_module(void *ctx, enum check_internal check, u64 *stack_hash) {
+	const u32 probe_depth = max_stack_depth < DEFAULT_MAX_STACK_DEPTH ? max_stack_depth : DEFAULT_MAX_STACK_DEPTH;
 	struct walk_ctx walk = { .hash = FNV_OFFSET_BASIS, .check = check };
 	struct stack_trace_t *data;
 	long stack_bytes;
@@ -266,7 +267,15 @@ static bool called_from_module(void *ctx, enum check_internal check, u64 *stack_
 	if (!data)
 		return false;
 
-	stack_bytes = bpf_get_stack(ctx, data->kern_stack, max_stack_depth * sizeof(*data->kern_stack), 0);
+	/*
+	 * bpf_get_stack() zeroes whatever part of the buffer the stack does not
+	 * fill, which with a high kernel.perf_event_max_stack costs more than the
+	 * unwind itself. Capture into a small buffer first and only use the whole
+	 * one for stacks that fill it.
+	 */
+	stack_bytes = bpf_get_stack(ctx, data->kern_stack, probe_depth * sizeof(*data->kern_stack), 0);
+	if (stack_bytes == probe_depth * sizeof(*data->kern_stack) && max_stack_depth > probe_depth)
+		stack_bytes = bpf_get_stack(ctx, data->kern_stack, max_stack_depth * sizeof(*data->kern_stack), 0);
 	if (stack_bytes < 0) {
 		bpf_printk("bpf_get_stack() failed: %ld\n", stack_bytes);
 		return false;
