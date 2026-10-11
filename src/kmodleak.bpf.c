@@ -31,6 +31,7 @@ __u64 module_init_size = 0;
 
 __u64 traced_module = 0; /* struct module * of the traced module */
 __u64 truncated_stacks = 0; /* captures that filled the stack buffer */
+__u64 dropped_allocs = 0; /* allocations the allocs map could not take */
 bool mod_loaded = false;
 bool mod_initialized = false;
 
@@ -220,8 +221,8 @@ static int record_alloc(u64 address, size_t size, u64 stack_hash) {
 	info.size = size;
 	info.stack_hash = stack_hash;
 
-	if (address != 0)
-		bpf_map_update_elem(&allocs, &address, &info, BPF_ANY);
+	if (address != 0 && bpf_map_update_elem(&allocs, &address, &info, BPF_ANY))
+		__sync_fetch_and_add(&dropped_allocs, 1);
 
 	if (trace_all)
 		bpf_printk("alloc exited, address = %lx, size = %lu\n", address, info.size);
@@ -231,15 +232,19 @@ static int record_alloc(u64 address, size_t size, u64 stack_hash) {
 
 static int record_free(const void *address) {
 	const u64 addr = (u64)address;
+	const struct alloc_info *info;
+	u64 size;
 
-	const struct alloc_info *info = bpf_map_lookup_elem(&allocs, &addr);
+	info = bpf_map_lookup_elem(&allocs, &addr);
 	if (!info)
 		return 0;
 
+	/* The entry may be reused as soon as it is deleted */
+	size = info->size;
 	bpf_map_delete_elem(&allocs, &addr);
 
 	if (trace_all)
-		bpf_printk("free entered, address = %lx, size = %lu\n", address, info->size);
+		bpf_printk("free entered, address = %lx, size = %lu\n", address, size);
 
 	return 0;
 }
@@ -254,6 +259,7 @@ static int record_free(const void *address) {
  * taken for the vm_map_ram block pool.
  */
 static bool called_from_module(void *ctx, enum check_internal check, u64 *stack_hash) {
+	const u32 probe_depth = max_stack_depth < DEFAULT_MAX_STACK_DEPTH ? max_stack_depth : DEFAULT_MAX_STACK_DEPTH;
 	struct walk_ctx walk = { .hash = FNV_OFFSET_BASIS, .check = check };
 	struct stack_trace_t *data;
 	long stack_bytes;
@@ -266,7 +272,15 @@ static bool called_from_module(void *ctx, enum check_internal check, u64 *stack_
 	if (!data)
 		return false;
 
-	stack_bytes = bpf_get_stack(ctx, data->kern_stack, max_stack_depth * sizeof(*data->kern_stack), 0);
+	/*
+	 * bpf_get_stack() zeroes whatever part of the buffer the stack does not
+	 * fill, which with a high kernel.perf_event_max_stack costs more than the
+	 * unwind itself. Capture into a small buffer first and only use the whole
+	 * one for stacks that fill it.
+	 */
+	stack_bytes = bpf_get_stack(ctx, data->kern_stack, probe_depth * sizeof(*data->kern_stack), 0);
+	if (stack_bytes == probe_depth * sizeof(*data->kern_stack) && max_stack_depth > probe_depth)
+		stack_bytes = bpf_get_stack(ctx, data->kern_stack, max_stack_depth * sizeof(*data->kern_stack), 0);
 	if (stack_bytes < 0) {
 		bpf_printk("bpf_get_stack() failed: %ld\n", stack_bytes);
 		return false;
@@ -339,6 +353,10 @@ int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 
 	if (bpf_strncmp(modname, sizeof(modname), (const char *)modtarget) != 0)
 		return 0;
+
+	/* Its text is about to be reused; stop attributing what runs there */
+	module_size = 0;
+	module_init_size = 0;
 
 	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
 	if (!ev)

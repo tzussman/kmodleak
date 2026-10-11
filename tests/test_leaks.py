@@ -24,6 +24,7 @@ def trace(kmodleak, modules, name, *flags, between=None, params=()):
     r = k.wait_exit()
     assert r.returncode == 0 and r.done
     assert r.loaded and r.unloaded
+    assert r.dropped_allocs == 0
     return r
 
 
