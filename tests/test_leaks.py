@@ -96,6 +96,13 @@ def test_page_allocation_freed(kmodleak, modules):
     assert r.outstanding == 0
 
 
+def test_failed_page_allocation_is_ignored(kmodleak, modules):
+    """The mm_page_alloc tracepoint fires with a pfn of -1 when the allocation
+    fails; that must not be recorded as an allocation that is never freed."""
+    r = trace(kmodleak, modules, "noleak_pages_fail")
+    assert r.outstanding == 0
+
+
 VMALLOC_TRACEPOINT = Path("/sys/kernel/tracing/events/vmalloc/alloc_vmap_area")
 
 needs_vmalloc_tracepoints = pytest.mark.skipif(

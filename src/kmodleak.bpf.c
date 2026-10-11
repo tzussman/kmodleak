@@ -478,6 +478,11 @@ int kmodleak__kmem_cache_free(void *ctx) {
 SEC("tracepoint/kmem/mm_page_alloc")
 int kmodleak__mm_page_alloc(struct trace_event_raw_mm_page_alloc *ctx) {
 	u64 stack_hash;
+
+	/* a failed allocation is traced with a pfn of -1 */
+	if (ctx->pfn == -1UL)
+		return 0;
+
 	if (!called_from_module(ctx, CHECK_PAGE, &stack_hash))
 		return 0;
 
