@@ -96,6 +96,40 @@ def test_page_allocation_freed(kmodleak, modules):
     assert r.outstanding == 0
 
 
+def test_failed_page_allocation_is_ignored(kmodleak, modules):
+    """The mm_page_alloc tracepoint fires with a pfn of -1 when the allocation
+    fails; that must not be recorded as an allocation that is never freed."""
+    r = trace(kmodleak, modules, "noleak_pages_fail")
+    assert r.outstanding == 0
+
+
+VMALLOC_TRACEPOINT = Path("/sys/kernel/tracing/events/vmalloc/alloc_vmap_area")
+
+needs_vmalloc_tracepoints = pytest.mark.skipif(
+    not VMALLOC_TRACEPOINT.exists(), reason="vmalloc tracepoints need Linux 6.2")
+
+
+@needs_vmalloc_tracepoints
+def test_vmalloc_leak(kmodleak, modules):
+    """A vmalloc() area is tracked by its address and counted once, without
+    the pages behind it. Its bookkeeping (vm_struct, vmap_area and the pages
+    array) leaks with it and is reported as well."""
+    r = trace(kmodleak, modules, "leak_vmalloc")
+
+    areas = [s for s in r.stacks if s.size >= 1 << 20]
+    assert len(areas) == 1
+    assert areas[0].count == 1
+    assert areas[0].is_direct_from("leak_vmalloc_init")
+    # no stack of per-page allocations behind the area
+    assert all(s.count == 1 for s in r.stacks if "leak_vmalloc_init" in s.symbols())
+
+
+@needs_vmalloc_tracepoints
+def test_vmalloc_freed(kmodleak, modules):
+    r = trace(kmodleak, modules, "noleak_vmalloc")
+    assert r.outstanding == 0
+
+
 def test_percpu_leak_with_flag(kmodleak, modules):
     r = trace(kmodleak, modules, "leak_percpu", "-P")
 
@@ -253,8 +287,8 @@ def test_signal_before_unload_reports(kmodleak, modules, sig):
 
 
 def test_leak_from_failing_init(kmodleak, modules):
-    """A module whose init fails is freed without an exit function; the
-    leak is still reported and its init symbol resolved."""
+    """A module whose init fails is freed from do_init_module() without an
+    exit function; the leak is still reported and its init symbol resolved."""
     k = kmodleak("leak_initfail")
     with pytest.raises(subprocess.CalledProcessError):
         k.insmod(modules.ko("leak_initfail"))

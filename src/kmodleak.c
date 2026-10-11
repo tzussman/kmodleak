@@ -30,7 +30,7 @@ static struct env {
 	bool trace_all;
 	bool percpu;
 	int max_stack_depth;
-	int stack_map_max_entries;
+	int stacks_max_entries;
 	long page_size;
 	bool verbose;
 	char modname[MODULE_NAME_LEN];
@@ -38,7 +38,7 @@ static struct env {
 	.trace_all = false, // -t --trace
 	.percpu = false, // --percpu
 	.max_stack_depth = DEFAULT_MAX_STACK_DEPTH, // overridden by kernel.perf_event_max_stack
-	.stack_map_max_entries = 10240,
+	.stacks_max_entries = STACKS_MAX_ENTRIES,
 	.page_size = 1,
 	.verbose = false,
 	.modname = "",
@@ -51,7 +51,7 @@ struct allocation_node {
 };
 
 struct allocation {
-	int stack_id;
+	uint64_t stack_hash;
 	size_t size;
 	size_t count;
 	struct allocation_node *allocations;
@@ -140,14 +140,14 @@ int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list a
 
 /*
  * Print a frame resolved by the BPF program, see record_mod_sym(). sym is
- * bpf_snprintf("%pS") output for addr - 1: name+0xoff/0xsize [module].
+ * bpf_snprintf("%pB") output: name+0xoff/0xsize [module].
  */
 static void print_mod_sym_frame(size_t i, uint64_t addr, const struct mod_sym *sym) {
 	char name[sizeof(sym->name)];
 	unsigned long off;
 
 	if (sscanf(sym->name, "%127[^+]+0x%lx", name, &off) == 2)
-		printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, name, off + 1);
+		printf("\t%3zu [<%016lx>] %s+0x%lx\n", i, addr, name, off);
 	else
 		printf("\t%3zu [<%016lx>] %s\n", i, addr, sym->name);
 }
@@ -190,7 +190,7 @@ void print_stack_frames_by_ksyms(uint64_t *stack) {
 	}
 }
 
-int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_traces_fd) {
+int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stacks_fd) {
 	int ret = 0;
 
 	uint64_t *stack = calloc(env.max_stack_depth, sizeof(*stack));
@@ -210,7 +210,7 @@ int print_stack_frames(struct allocation *allocs, size_t nr_allocs, int stack_tr
 			it = it->next;
 		}
 
-		if (bpf_map_lookup_elem(stack_traces_fd, &alloc->stack_id, stack)) {
+		if (bpf_map_lookup_elem(stacks_fd, &alloc->stack_hash, stack)) {
 			if (errno == ENOENT)
 				continue;
 
@@ -242,7 +242,7 @@ int alloc_size_compare(const void *a, const void *b) {
 	return 0;
 }
 
-int print_allocs(int allocs_fd, int stack_traces_fd) {
+int print_allocs(int allocs_fd, int stacks_fd) {
 	size_t nr_allocs = 0, nr_nostack = 0, nostack_size = 0;
 	int ret = 0;
 
@@ -277,24 +277,21 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 			goto cleanup;
 		}
 
-		/*
-		 * bpf_get_stackid() fails when the stack map is full or on a
-		 * hash collision. Count these so that they are not hidden.
-		 */
-		if (alloc_info.stack_id < 0) {
+		/* The stack could not be kept, e.g. the stacks map was full */
+		if (alloc_info.stack_hash == 0) {
 			nr_nostack++;
 			nostack_size += alloc_info.size;
 			continue;
 		}
 
-		// when the stack_id exists in the allocs array,
+		// when the stack_hash exists in the allocs array,
 		//   increment size with alloc_info.size
 		bool stack_exists = false;
 
 		for (size_t i = 0; !stack_exists && i < nr_allocs; ++i) {
 			struct allocation *alloc = &allocs[i];
 
-			if (alloc->stack_id == alloc_info.stack_id) {
+			if (alloc->stack_hash == alloc_info.stack_hash) {
 				alloc->size += alloc_info.size;
 				alloc->count++;
 
@@ -318,10 +315,10 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 		if (stack_exists)
 			continue;
 
-		// When the stack_id does not exist in the allocs array,
+		// When the stack_hash does not exist in the allocs array,
 		// create a new entry in the array
 		struct allocation alloc = {
-			.stack_id = alloc_info.stack_id,
+			.stack_hash = alloc_info.stack_hash,
 			.size = alloc_info.size,
 			.count = 1,
 			.allocations = NULL,
@@ -347,7 +344,7 @@ int print_allocs(int allocs_fd, int stack_traces_fd) {
 
 	printf("\n%zu stacks with outstanding allocations:\n", nr_allocs);
 
-	print_stack_frames(allocs, nr_allocs, stack_traces_fd);
+	print_stack_frames(allocs, nr_allocs, stacks_fd);
 
 	if (nr_nostack)
 		printf("%zu bytes in %zu allocations with no stack trace available\n",
@@ -388,68 +385,92 @@ void detach_kernel_module_load_tracepoint(struct kmodleak_bpf *skel) {
 	skel->links.kmodleak__module_load = NULL;
 }
 
-void detach_kernel_module_init_kretprobe(struct kmodleak_bpf *skel) {
-	bpf_link__destroy(skel->links.kmodleak__kretprobe__load_module);
-	skel->links.kmodleak__kretprobe__load_module = NULL;
-}
-
 /*
- * Page allocations made by the slab allocator while serving the module's
- * kmalloc() are not the module's own, and neither are the pages behind a
- * large kmalloc(), which is traced as an object. Page allocations whose stack
- * passes through a function with one of these prefixes are left out. The
- * exact names differ between kernel versions and slab allocators, so match
- * prefixes against kallsyms and use whatever exists.
+ * Allocations an allocator makes for itself while serving the module are not
+ * the module's own: pages taken by the slab allocator, including for a large
+ * kmalloc(), or by vmalloc(), whose objects and areas are traced separately
+ * and which outlive them; and vmap areas taken for the vm_map_ram() block
+ * pool. Allocations whose stack passes through a function with one of these
+ * prefixes are left out. The exact names differ between kernel versions and
+ * slab allocators, so match prefixes against kallsyms and use whatever exists.
  */
-static const char *slab_page_func_prefixes[] = {
+static const char *page_internal_prefixes[] = {
 	"__kmalloc", "___kmalloc", "kmalloc_large", "kmalloc_order", /* kmalloc and its page-backed sizes */
 	"new_slab", "allocate_slab", "___slab_alloc", "__slab_alloc", /* SLUB slab growth */
 	"kmem_getpages", "cache_grow", /* SLAB, before 6.8 */
+	"vm_area_alloc_pages", "__vmalloc", /* pages behind a vmalloc() */
 };
 
-static bool is_slab_page_func(const char *name) {
-	for (size_t i = 0; i < sizeof(slab_page_func_prefixes) / sizeof(*slab_page_func_prefixes); i++) {
-		if (strncmp(name, slab_page_func_prefixes[i], strlen(slab_page_func_prefixes[i])) == 0)
+static const char *vmap_internal_prefixes[] = {
+	"new_vmap_block", /* vm_map_ram() block pool */
+};
+
+static bool has_prefix(const char *name, const char **prefixes, size_t n) {
+	for (size_t i = 0; i < n; i++) {
+		if (strncmp(name, prefixes[i], strlen(prefixes[i])) == 0)
 			return true;
 	}
 
 	return false;
 }
 
-static int fill_slab_ranges(struct kmodleak_bpf *skel) {
-	struct ksyms *ks = ksyms__load();
+static size_t fill_ranges(struct ksyms *ks, const char **prefixes, size_t nr_prefixes,
+			  volatile struct addr_range *ranges, size_t max) {
 	size_t n = 0;
-
-	if (!ks)
-		return -1;
 
 	/* syms are sorted by address, so a function ends where the next symbol starts */
 	for (int i = 0; i < ks->syms_sz - 1; i++) {
 		const struct ksym *sym = &ks->syms[i], *next = sym + 1;
 
-		if (!is_slab_page_func(sym->name))
+		if (!has_prefix(sym->name, prefixes, nr_prefixes))
 			continue;
 
 		while (next < ks->syms + ks->syms_sz - 1 && next->addr == sym->addr)
 			next++;
 
-		if (n == SLAB_RANGES_MAX) {
-			fprintf(stderr, "warning: too many slab allocator symbols, ignoring %s\n", sym->name);
+		if (n == max) {
+			fprintf(stderr, "warning: too many allocator symbols, ignoring %s\n", sym->name);
 			continue;
 		}
 
-		skel->rodata->slab_ranges[n].start = sym->addr;
-		skel->rodata->slab_ranges[n].end = next->addr;
+		ranges[n].start = sym->addr;
+		ranges[n].end = next->addr;
 		n++;
 	}
 
-	skel->rodata->nr_slab_ranges = n;
+	return n;
+}
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
+
+static int fill_internal_ranges(struct kmodleak_bpf *skel) {
+	struct ksyms *ks = ksyms__load();
+
+	if (!ks)
+		return -1;
+
+	skel->rodata->nr_page_internal_ranges =
+		fill_ranges(ks, page_internal_prefixes, ARRAY_SIZE(page_internal_prefixes),
+			    skel->rodata->page_internal_ranges, PAGE_INTERNAL_RANGES_MAX);
+	skel->rodata->nr_vmap_internal_ranges =
+		fill_ranges(ks, vmap_internal_prefixes, ARRAY_SIZE(vmap_internal_prefixes),
+			    skel->rodata->vmap_internal_ranges, VMAP_INTERNAL_RANGES_MAX);
 	ksyms__free(ks);
 
-	if (n == 0)
+	if (skel->rodata->nr_page_internal_ranges == 0)
 		fprintf(stderr, "warning: no slab allocator symbols found; slab pages will be attributed to the module\n");
 
 	return 0;
+}
+
+bool has_kernel_vmalloc_tracepoints(void) {
+	return tracepoint_exists("vmalloc", "alloc_vmap_area") &&
+	       tracepoint_exists("vmalloc", "free_vmap_area_noflush");
+}
+
+void disable_kernel_vmalloc_tracepoints(struct kmodleak_bpf *skel) {
+	bpf_program__set_autoload(skel->progs.kmodleak__alloc_vmap_area, false);
+	bpf_program__set_autoload(skel->progs.kmodleak__free_vmap_area_noflush, false);
 }
 
 int handle_event(void *ctx, void *data, size_t data_sz) {
@@ -461,8 +482,6 @@ int handle_event(void *ctx, void *data, size_t data_sz) {
 		detach_kernel_module_load_tracepoint(skel);
 
 		printf("module '%s' loaded\n", env.modname);
-	} else if (ev->state == MOD_INITIALIZED) {
-		detach_kernel_module_init_kretprobe(skel);
 	} else if (ev->state == MOD_FREED) {
 		if (!mod_loaded) {
 			fprintf(stderr, "error: module '%s' freed before loaded\n", env.modname);
@@ -552,7 +571,7 @@ int main(int argc, char **argv) {
 	skel->rodata->page_size = env.page_size;
 	skel->rodata->max_stack_depth = env.max_stack_depth;
 
-	if (fill_slab_ranges(skel)) {
+	if (fill_internal_ranges(skel)) {
 		fprintf(stderr, "failed to load kernel symbols\n");
 		ret = 1;
 
@@ -560,11 +579,10 @@ int main(int argc, char **argv) {
 	}
 	memcpy(skel->rodata->modtarget, env.modname, sizeof(env.modname));
 
-	bpf_map__set_value_size(skel->maps.stack_traces,
-				env.max_stack_depth * sizeof(unsigned long));
+	bpf_map__set_value_size(skel->maps.stacks, env.max_stack_depth * sizeof(uint64_t));
+	bpf_map__set_max_entries(skel->maps.stacks, env.stacks_max_entries);
 	bpf_map__set_value_size(skel->maps.tmp_stack_traces,
 				sizeof(long) + env.max_stack_depth * sizeof(uint64_t));
-	bpf_map__set_max_entries(skel->maps.stack_traces, env.stack_map_max_entries);
 
 	// Disable kernel tracepoints based on settings or availability
 	if (!has_kernel_node_tracepoints())
@@ -572,6 +590,10 @@ int main(int argc, char **argv) {
 
 	if (!env.percpu)
 		disable_kernel_percpu_tracepoints(skel);
+
+	/* vmalloc tracepoints exist since Linux 6.2 */
+	if (!has_kernel_vmalloc_tracepoints())
+		disable_kernel_vmalloc_tracepoints(skel);
 
 	ret = kmodleak_bpf__load(skel);
 	if (ret) {
@@ -581,7 +603,7 @@ int main(int argc, char **argv) {
 	}
 
 	const int allocs_fd = bpf_map__fd(skel->maps.allocs);
-	const int stack_traces_fd = bpf_map__fd(skel->maps.stack_traces);
+	const int stacks_fd = bpf_map__fd(skel->maps.stacks);
 	mod_syms_fd = bpf_map__fd(skel->maps.mod_syms);
 
 	ret = kmodleak_bpf__attach(skel);
@@ -622,7 +644,7 @@ int main(int argc, char **argv) {
 	if (!ksyms)
 		fprintf(stderr, "warning: failed to load kernel symbols\n");
 
-	if (print_allocs(allocs_fd, stack_traces_fd))
+	if (print_allocs(allocs_fd, stacks_fd))
 		ret = 1;
 
 	if (skel->bss->truncated_stacks)

@@ -19,26 +19,33 @@
 #define MOD_SYMS_MAX_ENTRIES 4096
 
 struct mod_sym {
-	char name[128]; /* bpf_snprintf("%pS") output */
+	char name[128]; /* bpf_snprintf("%pB") output */
 };
 
-/* Kernel functions whose frames mark a page allocation as the slab allocator's */
-#define SLAB_RANGES_MAX 64
+/*
+ * Kernel functions whose frames mark an allocation as an allocator's own
+ * rather than the module's: page allocations under the slab allocator or
+ * vmalloc, and vmap areas under the vm_map_ram block pool.
+ */
+#define PAGE_INTERNAL_RANGES_MAX 64
+#define VMAP_INTERNAL_RANGES_MAX 8
 
 struct addr_range {
 	__u64 start;
 	__u64 end;
 };
 
+/* Distinct stack traces kept for outstanding allocations */
+#define STACKS_MAX_ENTRIES 10240
+
 struct alloc_info {
 	__u64 size;
-	int stack_id;
+	__u64 stack_hash; /* key into the stacks map, 0 if the stack could not be kept */
 };
 
 enum modstate_t {
 	MOD_LOADED = 1,
-	MOD_INITIALIZED = 2,
-	MOD_FREED = 3,
+	MOD_FREED = 2,
 };
 
 struct mod_event {

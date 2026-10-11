@@ -24,7 +24,7 @@ is intended to serve as a lightweight replacement for its memory leak detector.*
 
 `kmodleak` must be run as root on a kernel built with `CONFIG_DEBUG_INFO_BTF`,
 `CONFIG_KPROBES` and `CONFIG_BPF_EVENTS`. Linux 5.17 or later is required for
-the BPF helpers used.
+the BPF helpers used, and 6.2 or later to trace `vmalloc()` allocations.
 
 ### Install Dependencies
 
@@ -171,12 +171,12 @@ For `./kmodleak`, run it in verbose mode (`-v`) to see libbpf debug logs:
 $ sudo ./kmodleak -v leak
 using page size: 4096
 libbpf: loading object 'kmodleak_bpf' from buffer
-libbpf: elf: section(2) .symtab, size 2208, link 1, flags 0, type=2
-libbpf: elf: section(3) .text, size 1544, link 0, flags 6, type=1
-libbpf: sec '.text': found program 'called_from_module' at insn offset 0 (0 bytes), code size 84 insns (672 bytes)
-libbpf: sec '.text': found program 'record_alloc' at insn offset 84 (672 bytes), code size 109 insns (872 bytes)
-libbpf: elf: section(4) raw_tracepoint/module_load, size 1104, link 0, flags 6, type=1
-libbpf: sec 'raw_tracepoint/module_load': found program 'kmodleak__module_load' at insn offset 0 (0 bytes), code size 138 insns (1104 bytes)
-libbpf: elf: section(5) kretprobe/load_module, size 208, link 0, flags 6, type=1
+libbpf: elf: section(2) .symtab, size 2664, link 1, flags 0, type=2
+libbpf: elf: section(3) .text, size 2352, link 0, flags 6, type=1
+libbpf: sec '.text': found program 'called_from_module' at insn offset 0 (0 bytes), code size 94 insns (752 bytes)
+libbpf: sec '.text': found program 'walk_frame' at insn offset 94 (752 bytes), code size 200 insns (1600 bytes)
+libbpf: elf: section(4) raw_tracepoint/module_load, size 976, link 0, flags 6, type=1
+libbpf: sec 'raw_tracepoint/module_load': found program 'kmodleak__module_load' at insn offset 0 (0 bytes), code size 122 insns (976 bytes)
+libbpf: elf: section(5) raw_tracepoint/module_free, size 272, link 0, flags 6, type=1
 ...
 ```
