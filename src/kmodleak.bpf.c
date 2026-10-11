@@ -354,6 +354,10 @@ int kmodleak__module_free(struct bpf_raw_tracepoint_args *ctx) {
 	if (bpf_strncmp(modname, sizeof(modname), (const char *)modtarget) != 0)
 		return 0;
 
+	/* Its text is about to be reused; stop attributing what runs there */
+	module_size = 0;
+	module_init_size = 0;
+
 	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
 	if (!ev)
 		return 0;
