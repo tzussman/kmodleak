@@ -24,7 +24,8 @@ is intended to serve as a lightweight replacement for its memory leak detector.*
 
 `kmodleak` must be run as root on a kernel built with `CONFIG_DEBUG_INFO_BTF`,
 `CONFIG_KPROBES` and `CONFIG_BPF_EVENTS`. Linux 5.17 or later is required for
-the BPF helpers used, and 6.2 or later to trace `vmalloc()` allocations.
+the BPF helpers used, 5.19 or later to trace per-CPU allocations, and 6.2 or
+later to trace `vmalloc()` allocations.
 
 ### Install Dependencies
 
@@ -100,7 +101,7 @@ done
 
 - `-t`, `--trace`: print a message for each traced allocation and free to the
   kernel trace buffer (`/sys/kernel/tracing/trace_pipe`)
-- `-P`, `--percpu`: also trace per-CPU allocations
+- `-P`, `--percpu`: also trace per-CPU allocations (Linux 5.19 or later)
 - `-v`, `--verbose`: print libbpf debug messages
 
 Hitting Ctrl-C before the module is unloaded ends tracing early and prints the
