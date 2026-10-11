@@ -31,6 +31,7 @@ __u64 module_init_size = 0;
 
 __u64 traced_module = 0; /* struct module * of the traced module */
 __u64 truncated_stacks = 0; /* captures that filled the stack buffer */
+__u64 dropped_allocs = 0; /* allocations the allocs map could not take */
 bool mod_loaded = false;
 bool mod_initialized = false;
 
@@ -220,8 +221,8 @@ static int record_alloc(u64 address, size_t size, u64 stack_hash) {
 	info.size = size;
 	info.stack_hash = stack_hash;
 
-	if (address != 0)
-		bpf_map_update_elem(&allocs, &address, &info, BPF_ANY);
+	if (address != 0 && bpf_map_update_elem(&allocs, &address, &info, BPF_ANY))
+		__sync_fetch_and_add(&dropped_allocs, 1);
 
 	if (trace_all)
 		bpf_printk("alloc exited, address = %lx, size = %lu\n", address, info.size);

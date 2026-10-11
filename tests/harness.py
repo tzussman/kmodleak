@@ -74,6 +74,7 @@ class Report:
     no_stack_bytes: int = 0
     no_stack_count: int = 0
     truncated_stacks: int = 0  # captures that hit the stack depth limit
+    dropped_allocs: int = 0  # allocations the allocs map could not take
     done: bool = False
 
     @property
@@ -92,6 +93,7 @@ _RE = {
     "frame": re.compile(r"^\s+(\d+) \[<([0-9a-f]+)>\] (.+)$"),
     "nostack": re.compile(r"^(\d+) bytes in (\d+) allocations with no stack trace available$"),
     "truncated": re.compile(r"^warning: (\d+) stack traces hit the limit of (\d+) frames"),
+    "dropped": re.compile(r"^warning: (\d+) allocations could not be recorded"),
     "symbol": re.compile(r"^(.+)\+0x([0-9a-f]+)$"),
 }
 
@@ -139,6 +141,11 @@ def parse_report(output, returncode=0):
         m = _RE["truncated"].match(line)
         if m:
             report.truncated_stacks = int(m.group(1))
+            continue
+
+        m = _RE["dropped"].match(line)
+        if m:
+            report.dropped_allocs = int(m.group(1))
             continue
 
         if line == "done":

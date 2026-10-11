@@ -651,6 +651,10 @@ int main(int argc, char **argv) {
 		printf("warning: %llu stack traces hit the limit of %d frames (kernel.perf_event_max_stack); "
 		       "allocations in them may be unattributed\n",
 		       (unsigned long long)skel->bss->truncated_stacks, env.max_stack_depth);
+	if (skel->bss->dropped_allocs)
+		printf("warning: %llu allocations could not be recorded (more than %d outstanding); "
+		       "leaks may be missed\n",
+		       (unsigned long long)skel->bss->dropped_allocs, ALLOCS_MAX_ENTRIES);
 
 cleanup:
 	ksyms__free(ksyms);
