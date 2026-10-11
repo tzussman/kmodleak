@@ -232,15 +232,19 @@ static int record_alloc(u64 address, size_t size, u64 stack_hash) {
 
 static int record_free(const void *address) {
 	const u64 addr = (u64)address;
+	const struct alloc_info *info;
+	u64 size;
 
-	const struct alloc_info *info = bpf_map_lookup_elem(&allocs, &addr);
+	info = bpf_map_lookup_elem(&allocs, &addr);
 	if (!info)
 		return 0;
 
+	/* The entry may be reused as soon as it is deleted */
+	size = info->size;
 	bpf_map_delete_elem(&allocs, &addr);
 
 	if (trace_all)
-		bpf_printk("free entered, address = %lx, size = %lu\n", address, info->size);
+		bpf_printk("free entered, address = %lx, size = %lu\n", address, size);
 
 	return 0;
 }
